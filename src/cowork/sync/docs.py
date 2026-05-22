@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import urllib.request
+from pathlib import Path
+from typing import Optional
+
+import pypandoc
+
+from .gog import docs_info, drive_upload, GogError
+
+
+def fetch_doc_modified_time(drive_id: str, account: Optional[str] = None) -> str:
+    try:
+        info = docs_info(drive_id, account)
+        # gog docs info devuelve campos de Drive metadata
+        return info.get("modifiedTime", "")
+    except GogError:
+        from .gog import drive_get
+        meta = drive_get(drive_id, account)
+        return meta.get("modifiedTime", "")
+
+
+def md_to_docx(md_path: Path, out_path: Optional[Path] = None) -> Path:
+    if out_path is None:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tmp.close()
+        out_path = Path(tmp.name)
+    pypandoc.convert_file(str(md_path), "docx", outputfile=str(out_path))
+    return out_path
+
+
+def update_doc_content(drive_id: str, docx_path: Path,
+                       account: Optional[str] = None,
+                       access_token: Optional[str] = None) -> str:
+    """Reemplaza el contenido del Google Doc (drive_id) subiendo el docx.
+
+    Usa la Drive API v3 directamente con el access_token de gog, ya que
+    gog drive upload no convierte .docx a Google Doc nativo.
+
+    Devuelve el nuevo modifiedTime.
+    """
+    if access_token is None:
+        from .auth import get_access_token
+        from .gog import _run
+        # Inferir account desde gog si no se pasó
+        acct = account or _infer_account()
+        access_token = get_access_token(acct)
+
+    url = f"https://www.googleapis.com/upload/drive/v3/files/{drive_id}?uploadType=media&supportsAllDrives=true"
+    docx_bytes = docx_path.read_bytes()
+    req = urllib.request.Request(url, data=docx_bytes, method="PATCH")
+    req.add_header("Authorization", f"Bearer {access_token}")
+    req.add_header("Content-Type",
+                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    req.add_header("Content-Length", str(len(docx_bytes)))
+    with urllib.request.urlopen(req) as resp:
+        result = json.loads(resp.read())
+    return result.get("modifiedTime", "")
+
+
+def _infer_account() -> str:
+    """Lee la cuenta autenticada del config de gog."""
+    import subprocess
+    res = subprocess.run(
+        ["gog", "auth", "list", "--json"],
+        capture_output=True, text=True,
+    )
+    if res.returncode == 0 and res.stdout.strip():
+        data = json.loads(res.stdout)
+        accounts = data if isinstance(data, list) else data.get("accounts", [])
+        if accounts:
+            return accounts[0].get("email", accounts[0]) if isinstance(accounts[0], dict) else accounts[0]
+    raise RuntimeError("No se pudo inferir la cuenta de gog. Pasá --account explícitamente.")
