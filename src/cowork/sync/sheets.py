@@ -74,10 +74,11 @@ def _resolve_tab(item: Item, meta: dict) -> tuple[str, int]:
     if item.sheet_tab:
         for t in tabs:
             if t["properties"]["title"] == item.sheet_tab:
-                return t["properties"]["title"], t["properties"]["sheetId"]
+                # sheetId puede faltar en la pestaña por defecto (id=0); default a 0.
+                return t["properties"]["title"], t["properties"].get("sheetId", 0)
         raise ValueError(f"Tab '{item.sheet_tab}' no encontrado en spreadsheet {item.drive_id}")
     t = tabs[0]
-    return t["properties"]["title"], t["properties"]["sheetId"]
+    return t["properties"]["title"], t["properties"].get("sheetId", 0)
 
 
 def _rows_to_matrix(raw_values: list[list[str]], raw_formulas: list[list[str]],
@@ -128,8 +129,8 @@ def fetch_remote_sheet(item: Item, account: Optional[str] = None) -> RemoteSheet
 
     # Fetch valores y fórmulas — rango = tab completa
     range_ = f"'{tab_title}'"
-    raw_values = sheets_get(item.drive_id, range_, render="FORMATTED_VALUE", account=account)
-    raw_formulas = sheets_get(item.drive_id, range_, render="FORMULA", account=account)
+    raw_values = sheets_get(item.drive_id, range_, render="FORMATTED_VALUE", account=account) or []
+    raw_formulas = sheets_get(item.drive_id, range_, render="FORMULA", account=account) or []
 
     # headers_row es 1-indexed, en raw_values es 0-indexed
     hr = item.headers_row - 1
