@@ -70,14 +70,16 @@ def write_csv_matrix(path: Path, matrix: Matrix) -> None:
 
 def _resolve_tab(item: Item, meta: dict) -> tuple[str, int]:
     """Devuelve (tab_title, sheet_id) según la configuración del item."""
+    # La API de Sheets omite `sheetId` cuando vale 0 (primer tab por default).
     tabs = meta.get("sheets", [])
     if item.sheet_tab:
         for t in tabs:
-            if t["properties"]["title"] == item.sheet_tab:
-                return t["properties"]["title"], t["properties"]["sheetId"]
+            props = t["properties"]
+            if props["title"] == item.sheet_tab:
+                return props["title"], props.get("sheetId", 0)
         raise ValueError(f"Tab '{item.sheet_tab}' no encontrado en spreadsheet {item.drive_id}")
-    t = tabs[0]
-    return t["properties"]["title"], t["properties"]["sheetId"]
+    props = tabs[0]["properties"]
+    return props["title"], props.get("sheetId", 0)
 
 
 def _rows_to_matrix(raw_values: list[list[str]], raw_formulas: list[list[str]],
