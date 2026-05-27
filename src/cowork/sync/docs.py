@@ -8,18 +8,18 @@ from typing import Optional
 
 import pypandoc
 
-from .gog import docs_info, drive_upload, GogError
+from .gog import docs_info, drive_get, extract_modified_time, GogError
 
 
 def fetch_doc_modified_time(drive_id: str, account: Optional[str] = None) -> str:
     try:
-        info = docs_info(drive_id, account)
-        # gog docs info devuelve campos de Drive metadata
-        return info.get("modifiedTime", "")
+        mt = extract_modified_time(docs_info(drive_id, account))
+        if mt:
+            return mt
     except GogError:
-        from .gog import drive_get
-        meta = drive_get(drive_id, account)
-        return meta.get("modifiedTime", "")
+        pass
+    meta = drive_get(drive_id, account)
+    return extract_modified_time(meta)
 
 
 def md_to_docx(md_path: Path, out_path: Optional[Path] = None) -> Path:
@@ -57,7 +57,7 @@ def update_doc_content(drive_id: str, docx_path: Path,
     req.add_header("Content-Length", str(len(docx_bytes)))
     with urllib.request.urlopen(req) as resp:
         result = json.loads(resp.read())
-    return result.get("modifiedTime", "")
+    return extract_modified_time(result)
 
 
 def _infer_account() -> str:

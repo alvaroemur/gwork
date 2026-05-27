@@ -7,7 +7,7 @@ from typing import Optional
 
 from .gog import (
     sheets_get, sheets_metadata, sheets_update_range,
-    drive_comments_list, GogError,
+    drive_comments_list, drive_get, extract_modified_time, GogError,
 )
 from .manifest import Item
 from .state import SheetSnapshot
@@ -123,10 +123,8 @@ def fetch_remote_sheet(item: Item, account: Optional[str] = None) -> RemoteSheet
     meta = sheets_metadata(item.drive_id, account)
     tab_title, sheet_id = _resolve_tab(item, meta)
 
-    # modifiedTime via drive get
-    from .gog import drive_get
     drive_meta = drive_get(item.drive_id, account)
-    modified_time = drive_meta.get("modifiedTime", "")
+    modified_time = extract_modified_time(drive_meta)
 
     # Fetch valores y fórmulas — rango = tab completa
     range_ = f"'{tab_title}'"

@@ -46,6 +46,15 @@ def plan(root: Path, account: str):
               default=Path.cwd, help="Directorio del cliente.")
 @click.option("--account", default=None, help="Cuenta de Google (email) para gog-cli.")
 @click.option("--only", multiple=True, help="Solo aplicar estos paths locales.")
-def apply(root: Path, account: str, only: tuple):
+@click.option(
+    "--force-content-push",
+    is_flag=True,
+    default=False,
+    help="Permite apply en Docs con protect_styling (destruye estilo nativo vía Pandoc).",
+)
+def apply(root: Path, account: str, only: tuple, force_content_push: bool):
     """Ejecuta el plan: batchUpdate de Sheets, upload de Docs, write-back local."""
-    sys.exit(cmd_apply(root, only=list(only), account=account))
+    sys.exit(cmd_apply(
+        root, only=list(only), account=account,
+        force_content_push=force_content_push,
+    ))

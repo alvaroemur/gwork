@@ -27,6 +27,7 @@ class Item:
     data_end_row: Optional[int] = None
     key_column: Optional[str] = None
     sync_mode: SyncMode = "values_patch"
+    protect_styling: bool = False
     transforms: list[Transform] = field(default_factory=list)
 
 
@@ -76,6 +77,7 @@ def load_manifest(root: Path) -> Manifest:
             data_end_row=raw.get("data_end_row"),
             key_column=raw.get("key_column"),
             sync_mode=raw.get("sync_mode", "values_patch"),
+            protect_styling=bool(raw.get("protect_styling", False)),
             transforms=transforms,
         ))
     return Manifest(
