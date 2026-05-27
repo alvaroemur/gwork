@@ -11,8 +11,9 @@ from .docs import fetch_doc_modified_time, md_to_docx, update_doc_content
 from .gog import extract_modified_time
 from .manifest import Item, Manifest, load_manifest
 from . import sheets as sh
+from .snapshots import save_doc_apply_snapshot
 from .state import DocSnapshot, SheetSnapshot, State, file_hash, matrix_hash
-from .transforms import apply_md_transforms
+from .transforms import apply_md_transforms, doc_transform_names
 
 
 console = Console()
@@ -245,7 +246,7 @@ def _plan_doc(manifest: Manifest, item: Item, state: State,
     if snapshot.local_hash == local_h:
         return {**base, "status": "noop"}
 
-    transform_names = [t.name for t in item.transforms]
+    transform_names = doc_transform_names(manifest, item)
     result = apply_md_transforms(local_path, manifest, transform_names)
     preview_path = manifest.preview_dir / item.local
     preview_path.parent.mkdir(parents=True, exist_ok=True)
@@ -431,13 +432,33 @@ def _apply_doc(manifest: Manifest, item: Item, entry: dict, state: State,
             f"(requiere --force-content-push)[/yellow]"
         )
         return False
-    preview_path = manifest.root / entry["preview_path"]
+    preview_path = manifest.root / entry["preview_path"] if entry.get("preview_path") else None
+    if preview_path is None or not preview_path.exists():
+        local_path = manifest.root / item.local
+        transform_names = doc_transform_names(manifest, item)
+        result = apply_md_transforms(local_path, manifest, transform_names)
+        preview_path = manifest.preview_dir / item.local
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.write_text(result.text, encoding="utf-8")
+    pushed_md = preview_path.read_text(encoding="utf-8")
     docx_path = md_to_docx(preview_path)
     new_mt = update_doc_content(item.drive_id, docx_path, account, access_token)
+    applied_at = now_iso()
+    local_hash = entry.get("local_hash") or file_hash(manifest.root / item.local)
+    save_doc_apply_snapshot(
+        manifest.root,
+        item.local,
+        item.drive_id,
+        pushed_md,
+        local_hash=local_hash,
+        remote_modified_time=new_mt or remote_mt,
+        account=account,
+        applied_at=applied_at,
+    )
     state.set_doc(item.local, DocSnapshot(
         remote_modified_time=new_mt or remote_mt,
-        local_hash=entry["local_hash"],
-        applied_at=now_iso(),
+        local_hash=local_hash,
+        applied_at=applied_at,
     ))
     return True
 
