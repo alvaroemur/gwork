@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .manifest import Manifest
+from .manifest import Item, Manifest
 
 
 @dataclass
@@ -103,3 +103,12 @@ def apply_md_transforms(md_path: Path, manifest: Manifest, transform_names: list
         rewrite_count=rewrite_count,
         unresolved_links=unresolved,
     )
+
+
+def doc_transform_names(manifest: Manifest, item: Item) -> list[str]:
+    """Nombres de transform a aplicar antes de subir un Doc."""
+    names = [t.name for t in item.transforms]
+    if manifest.effective_link_mode(item) == "rewrite_to_drive":
+        if "rewrite_links" not in names:
+            names.append("rewrite_links")
+    return names

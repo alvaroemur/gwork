@@ -85,6 +85,18 @@ def drive_get(file_id: str, account: Optional[str] = None) -> dict:
     return _run(["drive", "get", file_id], account)
 
 
+def extract_modified_time(meta: Optional[dict]) -> str:
+    """Lee modifiedTime de respuestas gog (top-level o bajo `file`)."""
+    if not meta:
+        return ""
+    if meta.get("modifiedTime"):
+        return meta["modifiedTime"]
+    file_obj = meta.get("file")
+    if isinstance(file_obj, dict) and file_obj.get("modifiedTime"):
+        return file_obj["modifiedTime"]
+    return ""
+
+
 def drive_upload(local_path: str, parent: Optional[str] = None,
                  name: Optional[str] = None, account: Optional[str] = None) -> dict:
     args = ["drive", "upload", local_path]

@@ -8,6 +8,7 @@ import yaml
 
 ItemType = Literal["sheet", "doc", "slides"]
 SyncMode = Literal["values_patch", "replace"]
+LinkMode = Literal["preserve", "rewrite_to_drive"]
 
 
 @dataclass
@@ -27,6 +28,8 @@ class Item:
     data_end_row: Optional[int] = None
     key_column: Optional[str] = None
     sync_mode: SyncMode = "values_patch"
+    protect_styling: bool = False
+    link_mode: Optional[LinkMode] = None
     transforms: list[Transform] = field(default_factory=list)
 
 
@@ -36,6 +39,7 @@ class Manifest:
     drive_folder_id: Optional[str]
     items: list[Item]
     root: Path
+    link_mode: Optional[LinkMode] = None
 
     @property
     def state_path(self) -> Path:
@@ -54,6 +58,13 @@ class Manifest:
             if it.local == local:
                 return it
         return None
+
+    def effective_link_mode(self, item: Item) -> LinkMode:
+        if item.link_mode:
+            return item.link_mode
+        if self.link_mode:
+            return self.link_mode
+        return "preserve"
 
 
 def load_manifest(root: Path) -> Manifest:
@@ -76,6 +87,8 @@ def load_manifest(root: Path) -> Manifest:
             data_end_row=raw.get("data_end_row"),
             key_column=raw.get("key_column"),
             sync_mode=raw.get("sync_mode", "values_patch"),
+            protect_styling=bool(raw.get("protect_styling", False)),
+            link_mode=raw.get("link_mode"),
             transforms=transforms,
         ))
     return Manifest(
@@ -83,4 +96,5 @@ def load_manifest(root: Path) -> Manifest:
         drive_folder_id=data.get("drive_folder_id"),
         items=items,
         root=root,
+        link_mode=data.get("link_mode"),
     )

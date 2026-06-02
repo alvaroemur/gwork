@@ -8,13 +8,39 @@ from rich.table import Table
 
 from .decisions import has_pending, now_iso, read_decisions, write_decisions
 from .docs import fetch_doc_modified_time, md_to_docx, update_doc_content
+from .gog import extract_modified_time
 from .manifest import Item, Manifest, load_manifest
 from . import sheets as sh
+from .snapshots import save_doc_apply_snapshot
 from .state import DocSnapshot, SheetSnapshot, State, file_hash, matrix_hash
-from .transforms import apply_md_transforms
+from .transforms import apply_md_transforms, doc_transform_names
 
 
 console = Console()
+
+
+def _doc_remote_drift(remote_mt: str, snapshot: DocSnapshot) -> tuple[bool, str]:
+    """True si Drive cambió respecto al snapshot y (si hay) después del último apply."""
+    if not remote_mt:
+        return False, ""
+    newer_than_snapshot = (
+        not snapshot.remote_modified_time
+        or remote_mt > snapshot.remote_modified_time
+    )
+    if not newer_than_snapshot:
+        return False, ""
+    if snapshot.applied_at and remote_mt <= snapshot.applied_at:
+        return False, ""
+    if snapshot.remote_modified_time:
+        reason = f"Doc remoto editado: {snapshot.remote_modified_time} → {remote_mt}"
+    elif snapshot.applied_at:
+        reason = (
+            f"Doc remoto modificado ({remote_mt}) después del último apply "
+            f"({snapshot.applied_at})"
+        )
+    else:
+        reason = f"Doc remoto modificado ({remote_mt}); sin snapshot previo"
+    return True, reason
 
 
 # =====================================================================
@@ -58,7 +84,7 @@ def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = N
                 state.set_sheet(item.local, SheetSnapshot(
                     headers=local_matrix.headers,
                     rows=local_matrix.rows,
-                    remote_modified_time=drive_meta.get("modifiedTime", ""),
+                    remote_modified_time=extract_modified_time(drive_meta),
                     applied_at=now_iso(),
                     values_hash=matrix_hash(local_matrix.headers, local_matrix.rows),
                 ))
@@ -114,8 +140,14 @@ def cmd_plan(root: Path, account: Optional[str] = None) -> int:
     console.print(table)
     console.print(f"\n[dim]decisions.yaml → {manifest.decisions_path}[/dim]")
     pending = has_pending(decisions)
+    protected = [it for it in decisions["items"] if it.get("status") == "protected"]
     if pending:
         console.print(f"[yellow]{len(pending)} pendientes sin resolver.[/yellow]")
+    elif protected:
+        console.print(
+            f"[yellow]{len(protected)} doc(s) protegido(s): apply los saltea "
+            f"(usá --force-content-push tras confirmación).[/yellow]"
+        )
     else:
         console.print("[green]Todo listo para apply.[/green]")
     return 0
@@ -126,6 +158,7 @@ def _status_label(entry: dict) -> str:
     if s == "noop":           return "[dim]sin cambios[/dim]"
     if s == "struct_drift":   return f"[red]struct drift:[/red] {entry.get('struct_drift','')}"
     if s == "doc_drift":      return f"[red]doc drift:[/red] {entry.get('drift_reason','')}"
+    if s == "protected":      return f"[yellow]protegido[/yellow] — {entry.get('protect_reason','')}"
     if s == "missing_local":  return "[red]archivo local no existe[/red]"
     if s == "ok":
         bits = []
@@ -194,38 +227,56 @@ def _plan_doc(manifest: Manifest, item: Item, state: State,
     local_h = file_hash(local_path)
     remote_mt = fetch_doc_modified_time(item.drive_id, account)
 
-    if snapshot.remote_modified_time and remote_mt > snapshot.remote_modified_time:
+    drift, drift_reason = _doc_remote_drift(remote_mt, snapshot)
+    base = {
+        "local": item.local,
+        "type": "doc",
+        "remote_modified_time": remote_mt,
+        "snapshot_remote_modified_time": snapshot.remote_modified_time or None,
+        "applied_at": snapshot.applied_at,
+        "protect_styling": item.protect_styling,
+    }
+    if drift:
         return {
-            "local": item.local, "type": "doc", "status": "doc_drift",
-            "drift_reason": f"Doc remoto editado: {snapshot.remote_modified_time} → {remote_mt}",
+            **base,
+            "status": "doc_drift",
+            "drift_reason": drift_reason,
             "drift_decision": "pending",
         }
     if snapshot.local_hash == local_h:
-        return {"local": item.local, "type": "doc", "status": "noop"}
+        return {**base, "status": "noop"}
 
-    transform_names = [t.name for t in item.transforms]
+    transform_names = doc_transform_names(manifest, item)
     result = apply_md_transforms(local_path, manifest, transform_names)
     preview_path = manifest.preview_dir / item.local
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     preview_path.write_text(result.text)
 
-    return {
-        "local": item.local, "type": "doc", "status": "ok",
+    plan_entry = {
+        **base,
+        "status": "ok",
         "transforms_summary": {
             "strip": result.strip_count, "rewrite": result.rewrite_count,
             "unresolved": result.unresolved_links,
         },
         "preview_path": str(preview_path.relative_to(manifest.root)),
-        "remote_modified_time": remote_mt,
         "local_hash": local_h,
     }
+    if item.protect_styling:
+        plan_entry["status"] = "protected"
+        plan_entry["protect_reason"] = (
+            "protect_styling: el apply destruye el estilo nativo del Doc "
+            "(Pandoc). Usá --force-content-push solo tras confirmación explícita."
+        )
+    return plan_entry
 
 
 # =====================================================================
 #  APPLY
 # =====================================================================
 
-def cmd_apply(root: Path, only=None, account: Optional[str] = None) -> int:
+def cmd_apply(root: Path, only=None, account: Optional[str] = None,
+              force_content_push: bool = False) -> int:
     manifest = load_manifest(root)
     state = State(manifest.state_path)
 
@@ -249,9 +300,11 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None) -> int:
     for entry in decisions["items"]:
         if only_set and entry["local"] not in only_set:
             continue
-        if entry["status"] not in ("ok",):
-            if entry["status"] != "noop":
-                console.print(f"[yellow]skip {entry['local']} (status={entry['status']})[/yellow]")
+        status = entry.get("status")
+        if status == "noop":
+            continue
+        if status not in ("ok", "protected", "doc_drift"):
+            console.print(f"[yellow]skip {entry['local']} (status={status})[/yellow]")
             continue
 
         item = manifest.find_item(entry["local"])
@@ -259,15 +312,40 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None) -> int:
             console.print(f"[red]Item {entry['local']} no está en el manifiesto[/red]"); continue
 
         if item.type == "sheet":
+            if status != "ok":
+                console.print(f"[yellow]skip {entry['local']} (status={status})[/yellow]")
+                continue
             _apply_sheet(item, entry, state, account, manifest_root=manifest.root)
         elif item.type == "doc":
+            if status == "doc_drift":
+                if entry.get("drift_decision") != "force_push":
+                    console.print(
+                        f"[yellow]skip {entry['local']} (doc_drift — "
+                        f"poné drift_decision: force_push en decisions.yaml)[/yellow]"
+                    )
+                    continue
+            elif status == "protected":
+                if not force_content_push:
+                    console.print(
+                        f"[yellow]skip {entry['local']} (protect_styling — "
+                        f"usá --force-content-push tras confirmación explícita)[/yellow]"
+                    )
+                    continue
+            if item.protect_styling and not force_content_push:
+                console.print(
+                    f"[yellow]skip {entry['local']} (protect_styling — "
+                    f"usá --force-content-push)[/yellow]"
+                )
+                continue
             if _access_token is None and account:
                 from .auth import get_access_token
                 try:
                     _access_token = get_access_token(account)
                 except Exception as e:
                     console.print(f"[red]No se pudo obtener access token: {e}[/red]"); return 1
-            _apply_doc(manifest, item, entry, state, account, _access_token)
+            if not _apply_doc(manifest, item, entry, state, account, _access_token,
+                              force_content_push=force_content_push):
+                continue
         console.print(f"[green]✓[/green] {item.local}")
 
     state.save()
@@ -333,14 +411,55 @@ def _apply_sheet(item: Item, entry: dict, state: State,
 
 
 def _apply_doc(manifest: Manifest, item: Item, entry: dict, state: State,
-               account: Optional[str], access_token: Optional[str]) -> None:
-    preview_path = manifest.root / entry["preview_path"]
+               account: Optional[str], access_token: Optional[str],
+               force_content_push: bool = False) -> bool:
+    snapshot = state.get_doc(item.local)
+    remote_mt = fetch_doc_modified_time(item.drive_id, account)
+    drift, drift_reason = _doc_remote_drift(remote_mt, snapshot)
+    if drift and entry.get("drift_decision") != "force_push":
+        console.print(f"[yellow]skip {item.local}: {drift_reason}[/yellow]")
+        return False
+    plan_mt = entry.get("remote_modified_time")
+    if plan_mt and remote_mt and remote_mt != plan_mt:
+        console.print(
+            f"[yellow]Race en {item.local}: remoto cambió desde plan "
+            f"({plan_mt} → {remote_mt}). Skip.[/yellow]"
+        )
+        return False
+    if item.protect_styling and not force_content_push:
+        console.print(
+            f"[yellow]skip {item.local}: protect_styling activo "
+            f"(requiere --force-content-push)[/yellow]"
+        )
+        return False
+    preview_path = manifest.root / entry["preview_path"] if entry.get("preview_path") else None
+    if preview_path is None or not preview_path.exists():
+        local_path = manifest.root / item.local
+        transform_names = doc_transform_names(manifest, item)
+        result = apply_md_transforms(local_path, manifest, transform_names)
+        preview_path = manifest.preview_dir / item.local
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.write_text(result.text, encoding="utf-8")
+    pushed_md = preview_path.read_text(encoding="utf-8")
     docx_path = md_to_docx(preview_path)
     new_mt = update_doc_content(item.drive_id, docx_path, account, access_token)
+    applied_at = now_iso()
+    local_hash = entry.get("local_hash") or file_hash(manifest.root / item.local)
+    save_doc_apply_snapshot(
+        manifest.root,
+        item.local,
+        item.drive_id,
+        pushed_md,
+        local_hash=local_hash,
+        remote_modified_time=new_mt or remote_mt,
+        account=account,
+        applied_at=applied_at,
+    )
     state.set_doc(item.local, DocSnapshot(
-        remote_modified_time=new_mt,
-        local_hash=entry["local_hash"],
-        applied_at=now_iso(),
+        remote_modified_time=new_mt or remote_mt,
+        local_hash=local_hash,
+        applied_at=applied_at,
     ))
+    return True
 
 
