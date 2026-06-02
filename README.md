@@ -27,6 +27,31 @@ La primera corrida abre el navegador para autorizar; el token se cachea en
 
 ## Uso
 
+### fetch / sync (agente o humano)
+
+```
+cd ~/Cowork/inspiro/comercial/mifondo_oportunidades-ia
+cowork sync fetch --comments --diff --only docs/entregables/requisitos_v2/00_principal.md
+# Solo lectura: drift local/remoto, comentarios, diff aproximado
+
+cowork sync sync --only docs/entregables/requisitos_v2/00_principal.md
+# Preflight fetch → plan. Aborta si Drive cambió sin reflejo en local.
+
+cowork sync sync --apply --only docs/entregables/requisitos_v2/00_principal.md
+# Preflight OK → plan → apply (respeta protect_styling salvo --force-content-push)
+```
+
+Estados de preflight (`sync_status`):
+
+| Estado | Significado |
+|--------|-------------|
+| `noop` | Local y remoto alineados al snapshot |
+| `local_only` | Cambió el markdown local — candidato a push |
+| `remote_only` | Cambió Drive después del último apply — **no escribir** |
+| `conflict` | Cambiaron ambos — **no escribir** |
+
+### plan / apply (flujo clásico)
+
 ```
 cd ~/Cowork/inspiro/clientes/mifondo
 cowork sync plan        # lee manifiesto, compara local vs Drive, genera preview/
