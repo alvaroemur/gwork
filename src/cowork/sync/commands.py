@@ -7,7 +7,13 @@ from rich.console import Console
 from rich.table import Table
 
 from .decisions import has_pending, now_iso, read_decisions, write_decisions
-from .docs import fetch_doc_modified_time, md_to_docx, update_doc_content
+from .docs import (
+    fetch_doc_modified_time,
+    md_to_docx,
+    replace_doc_content_ast,
+    update_doc_content,
+)
+from .docs_ast import UnsupportedNode, markdown_to_blocks
 from .gog import extract_modified_time
 from .manifest import Item, Manifest, load_manifest
 from . import sheets as sh
@@ -160,6 +166,8 @@ def _status_label(entry: dict) -> str:
     if s == "doc_drift":      return f"[red]doc drift:[/red] {entry.get('drift_reason','')}"
     if s == "protected":      return f"[yellow]protegido[/yellow] — {entry.get('protect_reason','')}"
     if s == "missing_local":  return "[red]archivo local no existe[/red]"
+    if s == "unsupported_ast":
+        return f"[red]sin traducción a AST:[/red] {entry.get('unsupported_reason','')}"
     if s == "ok":
         bits = []
         auto = entry.get("auto_merge", [])
@@ -168,6 +176,8 @@ def _status_label(entry: dict) -> str:
         if auto: bits.append(f"{len(auto)} auto")
         if pend: bits.append(f"[yellow]{len(pend)} pendientes[/yellow]")
         if ts:   bits.append(f"strip={ts['strip']} rewrite={ts['rewrite']}")
+        ast = entry.get("ast_summary")
+        if ast: bits.append(f"ast={ast['blocks']} bloques/{ast['tables']} tablas")
         return " · ".join(bits) if bits else "[green]listo[/green]"
     return s
 
@@ -252,9 +262,11 @@ def _plan_doc(manifest: Manifest, item: Item, state: State,
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     preview_path.write_text(result.text)
 
+    content_mode = manifest.effective_content_mode(item)
     plan_entry = {
         **base,
         "status": "ok",
+        "content_mode": content_mode,
         "transforms_summary": {
             "strip": result.strip_count, "rewrite": result.rewrite_count,
             "unresolved": result.unresolved_links,
@@ -262,11 +274,31 @@ def _plan_doc(manifest: Manifest, item: Item, state: State,
         "preview_path": str(preview_path.relative_to(manifest.root)),
         "local_hash": local_h,
     }
+
+    if content_mode == "ast":
+        # Falla en el plan, no en el apply: si el Markdown tiene un nodo sin
+        # traducción, conviene saberlo antes de tocar el documento.
+        try:
+            blocks = markdown_to_blocks(result.text)
+        except UnsupportedNode as exc:
+            return {
+                **base,
+                "status": "unsupported_ast",
+                "content_mode": content_mode,
+                "unsupported_reason": str(exc),
+            }
+        plan_entry["ast_summary"] = {
+            "blocks": len(blocks),
+            "tables": sum(1 for b in blocks if hasattr(b, "rows")),
+        }
+        return plan_entry
+
     if item.protect_styling:
         plan_entry["status"] = "protected"
         plan_entry["protect_reason"] = (
-            "protect_styling: el apply destruye el estilo nativo del Doc "
-            "(Pandoc). Usa --force-content-push solo tras confirmación explícita."
+            "protect_styling con content_mode: docx_upload — el apply reemplaza "
+            "el archivo entero y destruye estilo nativo, pestañas y márgenes. "
+            "Usa content_mode: ast, o --force-content-push tras confirmación."
         )
     return plan_entry
 
@@ -286,6 +318,13 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None,
 
     decisions = read_decisions(manifest.decisions_path)
     account = account or decisions.get("account")
+    if force_content_push:
+        console.print(
+            "[yellow]--force-content-push está en retirada:[/yellow] solo tiene "
+            "efecto con content_mode: docx_upload. Con content_mode: ast (el "
+            "defecto) el apply ya no destruye el estilo nativo y la bandera se "
+            "ignora."
+        )
     pending = has_pending(decisions)
     if pending:
         console.print(f"[red]{len(pending)} decisiones pending — resuelve decisions.yaml:[/red]")
@@ -327,17 +366,20 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None,
             elif status == "protected":
                 if not force_content_push:
                     console.print(
-                        f"[yellow]skip {entry['local']} (protect_styling — "
-                        f"usa --force-content-push tras confirmación explícita)[/yellow]"
+                        f"[yellow]skip {entry['local']} (protect_styling con "
+                        f"docx_upload — pasa a content_mode: ast, o usa "
+                        f"--force-content-push tras confirmación explícita)[/yellow]"
                     )
                     continue
-            if item.protect_styling and not force_content_push:
+            content_mode = manifest.effective_content_mode(item)
+            if (content_mode == "docx_upload" and item.protect_styling
+                    and not force_content_push):
                 console.print(
-                    f"[yellow]skip {entry['local']} (protect_styling — "
-                    f"usa --force-content-push)[/yellow]"
+                    f"[yellow]skip {entry['local']} (protect_styling con "
+                    f"docx_upload — pasa a content_mode: ast)[/yellow]"
                 )
                 continue
-            if _access_token is None and account:
+            if content_mode == "docx_upload" and _access_token is None and account:
                 from .auth import get_access_token
                 try:
                     _access_token = get_access_token(account)
@@ -426,10 +468,12 @@ def _apply_doc(manifest: Manifest, item: Item, entry: dict, state: State,
             f"({plan_mt} → {remote_mt}). Skip.[/yellow]"
         )
         return False
-    if item.protect_styling and not force_content_push:
+    content_mode = manifest.effective_content_mode(item)
+    if (content_mode == "docx_upload" and item.protect_styling
+            and not force_content_push):
         console.print(
-            f"[yellow]skip {item.local}: protect_styling activo "
-            f"(requiere --force-content-push)[/yellow]"
+            f"[yellow]skip {item.local}: protect_styling con docx_upload "
+            f"(pasa a content_mode: ast, o --force-content-push)[/yellow]"
         )
         return False
     preview_path = manifest.root / entry["preview_path"] if entry.get("preview_path") else None
@@ -441,8 +485,17 @@ def _apply_doc(manifest: Manifest, item: Item, entry: dict, state: State,
         preview_path.parent.mkdir(parents=True, exist_ok=True)
         preview_path.write_text(result.text, encoding="utf-8")
     pushed_md = preview_path.read_text(encoding="utf-8")
-    docx_path = md_to_docx(preview_path)
-    new_mt = update_doc_content(item.drive_id, docx_path, account, access_token)
+    if content_mode == "ast":
+        try:
+            new_mt = replace_doc_content_ast(
+                item.drive_id, pushed_md, tab_id=item.doc_tab, account=account
+            )
+        except UnsupportedNode as exc:
+            console.print(f"[red]skip {item.local}: {exc}[/red]")
+            return False
+    else:
+        docx_path = md_to_docx(preview_path)
+        new_mt = update_doc_content(item.drive_id, docx_path, account, access_token)
     applied_at = now_iso()
     local_hash = entry.get("local_hash") or file_hash(manifest.root / item.local)
     save_doc_apply_snapshot(

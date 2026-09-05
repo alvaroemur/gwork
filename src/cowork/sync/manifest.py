@@ -9,6 +9,7 @@ import yaml
 ItemType = Literal["sheet", "doc", "slides"]
 SyncMode = Literal["values_patch", "replace"]
 LinkMode = Literal["preserve", "rewrite_to_drive"]
+ContentMode = Literal["ast", "docx_upload"]
 
 
 @dataclass
@@ -30,6 +31,8 @@ class Item:
     sync_mode: SyncMode = "values_patch"
     protect_styling: bool = False
     link_mode: Optional[LinkMode] = None
+    content_mode: Optional[ContentMode] = None
+    doc_tab: Optional[str] = None
     transforms: list[Transform] = field(default_factory=list)
 
 
@@ -40,6 +43,7 @@ class Manifest:
     items: list[Item]
     root: Path
     link_mode: Optional[LinkMode] = None
+    content_mode: Optional[ContentMode] = None
 
     @property
     def state_path(self) -> Path:
@@ -66,6 +70,18 @@ class Manifest:
             return self.link_mode
         return "preserve"
 
+    def effective_content_mode(self, item: Item) -> ContentMode:
+        """Cómo se escribe el contenido de un Doc.
+
+        El defecto es `ast` porque es el camino no destructivo: `docx_upload`
+        reemplaza el archivo entero y hay que pedirlo explícitamente.
+        """
+        if item.content_mode:
+            return item.content_mode
+        if self.content_mode:
+            return self.content_mode
+        return "ast"
+
 
 def load_manifest(root: Path) -> Manifest:
     path = root / ".drivesync.yaml"
@@ -89,6 +105,8 @@ def load_manifest(root: Path) -> Manifest:
             sync_mode=raw.get("sync_mode", "values_patch"),
             protect_styling=bool(raw.get("protect_styling", False)),
             link_mode=raw.get("link_mode"),
+            content_mode=raw.get("content_mode"),
+            doc_tab=raw.get("doc_tab"),
             transforms=transforms,
         ))
     return Manifest(
@@ -97,4 +115,5 @@ def load_manifest(root: Path) -> Manifest:
         items=items,
         root=root,
         link_mode=data.get("link_mode"),
+        content_mode=data.get("content_mode"),
     )

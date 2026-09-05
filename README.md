@@ -35,6 +35,19 @@ cowork sync plan        # lee manifiesto, compara local vs Drive, genera preview
 cowork sync apply       # ejecuta el plan: batchUpdate de Sheets, upload de Docs
 ```
 
+## Escritura de Docs: `content_mode`
+
+Los items de tipo `doc` se escriben de dos maneras:
+
+- `ast` (defecto) — construye el árbol nativo del Doc con `insertText` /
+  `insertTable` y `namedStyleType`. No reemplaza el archivo, así que márgenes,
+  pestañas y `namedStyles` sobreviven al push.
+- `docx_upload` — el camino histórico: sube un `.docx` de Pandoc y reemplaza el
+  archivo entero. Destructivo; requiere `--force-content-push` cuando el item
+  declara `protect_styling`.
+
+Diseño y límites: [docs/insercion-ast.md](docs/insercion-ast.md).
+
 ## Sistema de diseño de Google Docs (`cowork style`)
 
 Aplica un design system declarado en `.gdoc-sync.yaml` a un Doc gobernado:
