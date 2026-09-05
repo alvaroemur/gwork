@@ -35,6 +35,21 @@ cowork sync plan        # lee manifiesto, compara local vs Drive, genera preview
 cowork sync apply       # ejecuta el plan: batchUpdate de Sheets, upload de Docs
 ```
 
+## Sistema de diseño de Google Docs (`cowork style`)
+
+Aplica un design system declarado en `.gdoc-sync.yaml` a un Doc gobernado:
+
+```
+cowork style audit    # audita el doc contra el manifiesto, sin escribir
+cowork style plan     # dry-run: qué requests de batchUpdate saldrían
+cowork style apply    # purga separadores, calibra página y envía el lote atómico
+cowork style init     # crea un Doc nuevo con los namedStyles ya sembrados
+```
+
+`init` es el único camino para que HEADING_1 y compañía lleven los tokens de
+marca: la Docs API no expone `updateNamedStyles`, así que un documento que ya
+existe solo admite el overlay de `apply`. Detalle en la skill `gdoc-style-sync`.
+
 ## Diagramas
 
 Ver `docs/arquitectura.html` (servir con `python3 -m http.server 8765 --directory docs/`).

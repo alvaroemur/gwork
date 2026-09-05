@@ -8,6 +8,12 @@ import click
 warnings.filterwarnings("ignore", category=FutureWarning, module="google")
 warnings.filterwarnings("ignore", category=Warning, module="urllib3")
 
+from .style.commands import (
+    cmd_apply as cmd_style_apply,
+    cmd_audit as cmd_style_audit,
+    cmd_init as cmd_style_init,
+    cmd_plan as cmd_style_plan,
+)
 from .sync.commands import cmd_bootstrap, cmd_plan, cmd_apply
 
 
@@ -58,3 +64,64 @@ def apply(root: Path, account: str, only: tuple, force_content_push: bool):
         root, only=list(only), account=account,
         force_content_push=force_content_push,
     ))
+
+
+@main.group()
+def style():
+    """Aplica un sistema de diseño (.gdoc-sync.yaml) a un Google Doc gobernado."""
+
+
+_MANIFEST_OPT = click.option(
+    "--manifest", "manifest_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=Path(".gdoc-sync.yaml"), show_default=True,
+    help="Ruta al manifiesto de diseño (o al directorio que lo contiene).",
+)
+_ACCOUNT_OPT = click.option("--account", default=None,
+                            help="Cuenta de Google (email); por defecto la del manifiesto.")
+_TAB_OPT = click.option("--tab", default=None, help="Restringe a una pestaña (id o título).")
+
+
+@style.command("audit")
+@_MANIFEST_OPT
+@_ACCOUNT_OPT
+@_TAB_OPT
+def style_audit(manifest_path: Path, account: str, tab: str):
+    """Audita el documento contra el manifiesto sin escribir nada."""
+    sys.exit(cmd_style_audit(manifest_path, account=account, tab=tab))
+
+
+@style.command("plan")
+@_MANIFEST_OPT
+@_ACCOUNT_OPT
+@_TAB_OPT
+def style_plan(manifest_path: Path, account: str, tab: str):
+    """Calcula las operaciones de estilo (dry-run)."""
+    sys.exit(cmd_style_plan(manifest_path, account=account, tab=tab))
+
+
+@style.command("apply")
+@_MANIFEST_OPT
+@_ACCOUNT_OPT
+@_TAB_OPT
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Muestra el plan y termina sin escribir.")
+def style_apply(manifest_path: Path, account: str, tab: str, dry_run: bool):
+    """Aplica el sistema de diseño al documento vivo."""
+    sys.exit(cmd_style_apply(manifest_path, account=account, tab=tab, dry_run=dry_run))
+
+
+@style.command("init")
+@_MANIFEST_OPT
+@_ACCOUNT_OPT
+@click.option("--title", required=True, help="Título del Doc a crear.")
+@click.option("--parent", default=None, help="Carpeta de Drive destino.")
+@click.option("--source", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Markdown a importar; si se omite, se usa un esqueleto de estilos.")
+@click.option("--write-back", is_flag=True, default=False,
+              help="Escribe el doc_id resultante en el manifiesto.")
+def style_init(manifest_path: Path, account: str, title: str, parent: str,
+               source: Path, write_back: bool):
+    """Crea un Doc nuevo con los namedStyles del manifiesto ya sembrados."""
+    sys.exit(cmd_style_init(manifest_path, title=title, account=account,
+                            parent=parent, source=source, write_back=write_back))
