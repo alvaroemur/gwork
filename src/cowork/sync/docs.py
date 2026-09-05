@@ -72,4 +72,4 @@ def _infer_account() -> str:
         accounts = data if isinstance(data, list) else data.get("accounts", [])
         if accounts:
             return accounts[0].get("email", accounts[0]) if isinstance(accounts[0], dict) else accounts[0]
-    raise RuntimeError("No se pudo inferir la cuenta de gog. Pasá --account explícitamente.")
+    raise RuntimeError("No se pudo inferir la cuenta de gog. Pasa --account explícitamente.")
