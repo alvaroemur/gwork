@@ -103,7 +103,7 @@ def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = N
             console.print(f"[green]✓[/green] {item.local}")
 
     state.save()
-    console.print(f"\n[bold green]bootstrap completado[/bold green] — corré `cowork sync plan` ahora.")
+    console.print(f"\n[bold green]bootstrap completado[/bold green] — corre `cowork sync plan` ahora.")
     return 0
 
 
@@ -146,7 +146,7 @@ def cmd_plan(root: Path, account: Optional[str] = None) -> int:
     elif protected:
         console.print(
             f"[yellow]{len(protected)} doc(s) protegido(s): apply los saltea "
-            f"(usá --force-content-push tras confirmación).[/yellow]"
+            f"(usa --force-content-push tras confirmación).[/yellow]"
         )
     else:
         console.print("[green]Todo listo para apply.[/green]")
@@ -266,7 +266,7 @@ def _plan_doc(manifest: Manifest, item: Item, state: State,
         plan_entry["status"] = "protected"
         plan_entry["protect_reason"] = (
             "protect_styling: el apply destruye el estilo nativo del Doc "
-            "(Pandoc). Usá --force-content-push solo tras confirmación explícita."
+            "(Pandoc). Usa --force-content-push solo tras confirmación explícita."
         )
     return plan_entry
 
@@ -288,7 +288,7 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None,
     account = account or decisions.get("account")
     pending = has_pending(decisions)
     if pending:
-        console.print(f"[red]{len(pending)} decisiones pending — resolvé decisions.yaml:[/red]")
+        console.print(f"[red]{len(pending)} decisiones pending — resuelve decisions.yaml:[/red]")
         for p in pending[:10]:
             console.print(f"  · {p}")
         return 1
@@ -321,20 +321,20 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None,
                 if entry.get("drift_decision") != "force_push":
                     console.print(
                         f"[yellow]skip {entry['local']} (doc_drift — "
-                        f"poné drift_decision: force_push en decisions.yaml)[/yellow]"
+                        f"pon drift_decision: force_push en decisions.yaml)[/yellow]"
                     )
                     continue
             elif status == "protected":
                 if not force_content_push:
                     console.print(
                         f"[yellow]skip {entry['local']} (protect_styling — "
-                        f"usá --force-content-push tras confirmación explícita)[/yellow]"
+                        f"usa --force-content-push tras confirmación explícita)[/yellow]"
                     )
                     continue
             if item.protect_styling and not force_content_push:
                 console.print(
                     f"[yellow]skip {entry['local']} (protect_styling — "
-                    f"usá --force-content-push)[/yellow]"
+                    f"usa --force-content-push)[/yellow]"
                 )
                 continue
             if _access_token is None and account:

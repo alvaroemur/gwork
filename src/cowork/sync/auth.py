@@ -30,7 +30,7 @@ def get_access_token(account: str) -> str:
     if not GOG_CREDENTIALS.exists():
         raise FileNotFoundError(
             f"No se encontró {GOG_CREDENTIALS}. "
-            "Asegurate de tener gog-cli instalado y autenticado."
+            "Asegúrate de tener gog-cli instalado y autenticado."
         )
     creds = json.loads(GOG_CREDENTIALS.read_text())
     client_id = creds["client_id"]

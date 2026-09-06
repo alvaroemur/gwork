@@ -16,7 +16,7 @@ Pandoc debe estar instalado en el sistema (`brew install pandoc`).
 
 ## Autenticación
 
-Necesitás un OAuth client de tipo "desktop" en Google Cloud Console con las APIs Drive, Sheets y Docs habilitadas. Descargá el JSON y guardalo en:
+Necesitas un OAuth client de tipo "desktop" en Google Cloud Console con las APIs Drive, Sheets y Docs habilitadas. Descarga el JSON y guárdalo en:
 
 ```
 ~/.config/cowork/drivesync/client_secret.json
