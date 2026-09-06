@@ -56,7 +56,8 @@ def plan(root: Path, account: str):
     "--force-content-push",
     is_flag=True,
     default=False,
-    help="Permite apply en Docs con protect_styling (destruye estilo nativo vía Pandoc).",
+    help="En retirada: solo aplica a items con content_mode: docx_upload, "
+         "donde el apply reemplaza el archivo entero.",
 )
 def apply(root: Path, account: str, only: tuple, force_content_push: bool):
     """Ejecuta el plan: batchUpdate de Sheets, upload de Docs, write-back local."""

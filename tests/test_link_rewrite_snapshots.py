@@ -123,3 +123,33 @@ def test_save_doc_apply_snapshot_writes_md_and_sidecar(tmp_path: Path):
     assert '"drive_id": "DRIVE123"' in meta
     assert '"local_hash": "sha256:abc"' in meta
     assert '"account": "test@example.com"' in meta
+
+
+def test_content_mode_por_defecto_es_ast(tmp_path):
+    manifest = _manifest(tmp_path)
+    assert manifest.effective_content_mode(manifest.items[0]) == "ast"
+
+
+def test_content_mode_del_item_gana_al_del_manifiesto(tmp_path):
+    manifest = _manifest(tmp_path)
+    manifest.content_mode = "docx_upload"
+    assert manifest.effective_content_mode(manifest.items[0]) == "docx_upload"
+    manifest.items[0].content_mode = "ast"
+    assert manifest.effective_content_mode(manifest.items[0]) == "ast"
+
+
+def test_load_manifest_lee_content_mode_y_doc_tab(tmp_path):
+    (tmp_path / ".drivesync.yaml").write_text(
+        "client: c\n"
+        "content_mode: docx_upload\n"
+        "items:\n"
+        "  - local: docs/a.md\n"
+        "    drive_id: DOC_A\n"
+        "    type: doc\n"
+        "    doc_tab: t.abc\n",
+        encoding="utf-8",
+    )
+    manifest = load_manifest(tmp_path)
+    assert manifest.content_mode == "docx_upload"
+    assert manifest.items[0].doc_tab == "t.abc"
+    assert manifest.effective_content_mode(manifest.items[0]) == "docx_upload"

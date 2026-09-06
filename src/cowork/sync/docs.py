@@ -8,7 +8,15 @@ from typing import Optional
 
 import pypandoc
 
-from .gog import docs_info, drive_get, extract_modified_time, GogError
+from . import docs_ast
+from .gog import (
+    batch_execute,
+    docs_info,
+    docs_raw,
+    drive_get,
+    extract_modified_time,
+    GogError,
+)
 
 
 def fetch_doc_modified_time(drive_id: str, account: Optional[str] = None) -> str:
@@ -73,3 +81,36 @@ def _infer_account() -> str:
         if accounts:
             return accounts[0].get("email", accounts[0]) if isinstance(accounts[0], dict) else accounts[0]
     raise RuntimeError("No se pudo inferir la cuenta de gog. Pasa --account explícitamente.")
+
+
+def replace_doc_content_ast(drive_id: str, md_text: str,
+                            tab_id: Optional[str] = None,
+                            account: Optional[str] = None,
+                            code_font: str = docs_ast.CODE_FONT) -> str:
+    """Reemplaza el contenido de un Doc construyendo su árbol nativo.
+
+    A diferencia de `update_doc_content`, no sube un archivo: emite
+    `deleteContentRange` + `insertText`/`insertTable` + estilos por
+    `batchUpdate`, de modo que márgenes, pestañas y `namedStyles` del documento
+    sobreviven y el contenido insertado los hereda.
+
+    Tres lotes, dos relecturas: el detalle de por qué está en `docs/insercion-ast.md`.
+    """
+    blocks = docs_ast.markdown_to_blocks(md_text)
+
+    raw = docs_raw(drive_id, tab_id=tab_id, account=account)
+    requests = docs_ast.clear_body_requests(raw, tab_id)
+    requests += docs_ast.insert_requests(blocks, tab_id)
+    batch_execute(drive_id, requests, account=account, source="cowork.sync.ast")
+
+    raw = docs_raw(drive_id, tab_id=tab_id, account=account)
+    cell_requests = docs_ast.cell_text_requests(raw, blocks, tab_id)
+    if cell_requests:
+        batch_execute(drive_id, cell_requests, account=account, source="cowork.sync.ast")
+        raw = docs_raw(drive_id, tab_id=tab_id, account=account)
+
+    style = docs_ast.style_requests(raw, blocks, tab_id, code_font=code_font)
+    if style:
+        batch_execute(drive_id, style, account=account, source="cowork.sync.ast")
+
+    return extract_modified_time(drive_get(drive_id, account))
