@@ -15,6 +15,7 @@ from .style.commands import (
     cmd_plan as cmd_style_plan,
 )
 from .sync.commands import cmd_bootstrap, cmd_plan, cmd_apply
+from .sync.fetch import cmd_fetch, cmd_sync
 
 
 @click.group()
@@ -45,6 +46,49 @@ def bootstrap(root: Path, account: str, source: str):
 def plan(root: Path, account: str):
     """Calcula el plan: diff local vs Drive, escribe preview/ y decisions.yaml."""
     sys.exit(cmd_plan(root, account=account))
+
+
+@sync.command("fetch")
+@click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              default=Path.cwd, help="Directorio del cliente (contiene .drivesync.yaml).")
+@click.option("--account", default=None, help="Cuenta de Google (email) para gog-cli.")
+@click.option("--only", multiple=True, help="Solo estos paths locales.")
+@click.option("--comments", is_flag=True, default=False,
+              help="Incluye comentarios abiertos de Docs/Sheets.")
+@click.option("--diff", is_flag=True, default=False,
+              help="Muestra un diff aproximado local vs remoto (solo Docs).")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Salida en JSON.")
+def fetch(root: Path, account: str, only: tuple, comments: bool, diff: bool, as_json: bool):
+    """Solo lectura: drift local/remoto, comentarios abiertos, diff aproximado."""
+    sys.exit(cmd_fetch(
+        root, account=account, only=list(only), comments=comments, diff=diff, as_json=as_json,
+    ))
+
+
+@sync.command("sync")
+@click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              default=Path.cwd, help="Directorio del cliente (contiene .drivesync.yaml).")
+@click.option("--account", default=None, help="Cuenta de Google (email) para gog-cli.")
+@click.option("--only", multiple=True, help="Solo estos paths locales.")
+@click.option("--apply", "do_apply", is_flag=True, default=False,
+              help="Tras el preflight OK, ejecuta plan + apply.")
+@click.option(
+    "--force-content-push",
+    is_flag=True,
+    default=False,
+    help="En retirada: solo aplica a items con content_mode: docx_upload.",
+)
+@click.option("--comments", is_flag=True, default=False,
+              help="Muestra comentarios abiertos durante el preflight.")
+@click.option("--diff", is_flag=True, default=False,
+              help="Muestra diff aproximado durante el preflight (solo Docs).")
+def sync_sync(root: Path, account: str, only: tuple, do_apply: bool,
+              force_content_push: bool, comments: bool, diff: bool):
+    """Preflight fetch → plan → (--apply) apply. Aborta si Drive divergió del snapshot."""
+    sys.exit(cmd_sync(
+        root, account=account, only=list(only), apply=do_apply,
+        force_content_push=force_content_push, comments=comments, diff=diff,
+    ))
 
 
 @sync.command("apply")

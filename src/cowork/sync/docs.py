@@ -30,6 +30,37 @@ def fetch_doc_modified_time(drive_id: str, account: Optional[str] = None) -> str
     return extract_modified_time(meta)
 
 
+def fetch_doc_plain_text(drive_id: str, account: Optional[str] = None,
+                         access_token: Optional[str] = None) -> str:
+    """Texto plano del cuerpo del Google Doc (párrafos concatenados).
+
+    Usado solo por `cowork sync fetch --diff` para un preview aproximado;
+    no participa del apply (que usa docs_ast / replace_doc_content_ast).
+    """
+    if access_token is None:
+        from .auth import get_access_token
+        acct = account or _infer_account()
+        access_token = get_access_token(acct)
+
+    url = f"https://docs.googleapis.com/v1/documents/{drive_id}"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token}"})
+    with urllib.request.urlopen(req) as resp:
+        doc = json.loads(resp.read())
+
+    parts: list[str] = []
+    for el in doc.get("body", {}).get("content", []):
+        paragraph = el.get("paragraph")
+        if not paragraph:
+            continue
+        text = "".join(
+            (run.get("textRun") or {}).get("content", "")
+            for run in paragraph.get("elements", [])
+        ).strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
 def md_to_docx(md_path: Path, out_path: Optional[Path] = None) -> Path:
     if out_path is None:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
