@@ -17,6 +17,7 @@ from .style.commands import (
 )
 from .sync.commands import cmd_bootstrap, cmd_plan, cmd_apply
 from .sync.fetch import cmd_fetch, cmd_sync
+from .sync.organization import apply_organization, plan_organization
 
 
 @click.group()
@@ -35,25 +36,30 @@ def sync():
 @click.option("--account", default=None, help="Google account override for gog.")
 @click.option("--source", type=click.Choice(["remote", "local"]), default="remote",
               show_default=True, help="Initial source of truth.")
-def bootstrap(root: Path, account: str, source: str):
+@click.option("--only", multiple=True,
+              help="Exact local path, Drive ID, resource ID, or Drive/resource pair.")
+def bootstrap(root: Path, account: str, source: str, only: tuple):
     """Create initial snapshots before the first plan."""
-    sys.exit(cmd_bootstrap(root, source=source, account=account))
+    sys.exit(cmd_bootstrap(root, source=source, account=account, only=list(only)))
 
 
 @sync.command("plan")
 @click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
               default=Path.cwd, help="Project directory containing .gwork.yaml.")
 @click.option("--account", default=None, help="Google account override for gog.")
-def plan(root: Path, account: str):
+@click.option("--only", multiple=True,
+              help="Exact local path, Drive ID, resource ID, or Drive/resource pair.")
+def plan(root: Path, account: str, only: tuple):
     """Compare local files with Drive and write review artifacts."""
-    sys.exit(cmd_plan(root, account=account))
+    sys.exit(cmd_plan(root, account=account, only=list(only)))
 
 
 @sync.command("fetch")
 @click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
               default=Path.cwd, help="Project directory containing .gwork.yaml.")
 @click.option("--account", default=None, help="Google account override for gog.")
-@click.option("--only", multiple=True, help="Limit the check to these local paths.")
+@click.option("--only", multiple=True,
+              help="Exact local path, Drive ID, resource ID, or Drive/resource pair.")
 @click.option("--comments", is_flag=True, default=False,
               help="Include open Docs and Sheets comments.")
 @click.option("--diff", is_flag=True, default=False,
@@ -70,7 +76,8 @@ def fetch(root: Path, account: str, only: tuple, comments: bool, diff: bool, as_
 @click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
               default=Path.cwd, help="Project directory containing .gwork.yaml.")
 @click.option("--account", default=None, help="Google account override for gog.")
-@click.option("--only", multiple=True, help="Limit the sync to these local paths.")
+@click.option("--only", multiple=True,
+              help="Exact local path, Drive ID, resource ID, or Drive/resource pair.")
 @click.option("--apply", "do_apply", is_flag=True, default=False,
               help="Run plan and apply after a clean preflight.")
 @click.option(
@@ -96,7 +103,8 @@ def sync_sync(root: Path, account: str, only: tuple, do_apply: bool,
 @click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
               default=Path.cwd, help="Project directory.")
 @click.option("--account", default=None, help="Google account override for gog.")
-@click.option("--only", multiple=True, help="Apply only these local paths.")
+@click.option("--only", multiple=True,
+              help="Exact local path, Drive ID, resource ID, or Drive/resource pair.")
 @click.option(
     "--force-content-push",
     is_flag=True,
@@ -109,6 +117,73 @@ def apply(root: Path, account: str, only: tuple, force_content_push: bool):
         root, only=list(only), account=account,
         force_content_push=force_content_push,
     ))
+
+
+def _run_organization(plan_data: dict, do_apply: bool) -> None:
+    actions = plan_data["actions"]
+    if actions:
+        for action in actions:
+            detail = action.get("local") or action.get("to") or action.get("drive_id")
+            click.echo(f"{action['action']}: {detail}")
+    else:
+        click.echo("Organization is current.")
+    if do_apply:
+        apply_organization(plan_data)
+        click.echo(f"Applied organization to {plan_data['manifest_path']}")
+    else:
+        click.echo("Plan only. Re-run with --apply to write files and the manifest.")
+
+
+@main.command("organize")
+@click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              default=Path.cwd, help="Project directory containing .gwork.yaml.")
+@click.option("--drive-id", "drive_ids", multiple=True,
+              help="Reconcile one registered Drive file; repeat as needed.")
+@click.option("--account", default=None, help="Google account override for gog.")
+@click.option("--apply", "do_apply", is_flag=True, default=False,
+              help="Create missing local files and update .gwork.yaml.")
+def organize(root: Path, drive_ids: tuple, account: str, do_apply: bool):
+    """Discover tabs and worksheets, then reconcile the local organization."""
+    try:
+        plan_data = plan_organization(
+            root / ".gwork.yaml",
+            drive_ids=list(drive_ids) or None,
+            account=account,
+        )
+        _run_organization(plan_data, do_apply)
+    except (ValueError, FileNotFoundError, FileExistsError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@main.group("item")
+def item():
+    """Register Drive files explicitly."""
+
+
+@item.command("add")
+@click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              default=Path.cwd, help="Project directory.")
+@click.option("--drive-id", required=True, help="Google Doc or Spreadsheet ID.")
+@click.option("--type", "item_type", required=True,
+              type=click.Choice(["doc", "sheet"]), help="Drive file type.")
+@click.option("--directory", default=None,
+              help="Stable local directory; defaults from the Drive title.")
+@click.option("--account", default=None, help="Google account override for gog.")
+@click.option("--apply", "do_apply", is_flag=True, default=False,
+              help="Create local files and register the Drive file.")
+def item_add(root: Path, drive_id: str, item_type: str, directory: str,
+             account: str, do_apply: bool):
+    """Preview or apply explicit registration of one Drive file."""
+    try:
+        plan_data = plan_organization(
+            root / ".gwork.yaml",
+            registrations=[(drive_id, item_type, directory)],
+            drive_ids=[drive_id],
+            account=account,
+        )
+        _run_organization(plan_data, do_apply)
+    except (ValueError, FileNotFoundError, FileExistsError) as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @main.group()

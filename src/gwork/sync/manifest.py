@@ -33,6 +33,9 @@ class Item:
     local: str
     drive_id: str
     type: ItemType
+    resource_id: Optional[str] = None
+    resource_title: Optional[str] = None
+    drive_title: Optional[str] = None
     sheet_tab: Optional[str] = None
     headers_row: int = 1
     data_start_row: int = 2
@@ -56,6 +59,7 @@ class Manifest:
     style: dict[str, Any] = field(default_factory=dict)
     link_mode: Optional[LinkMode] = None
     content_mode: Optional[ContentMode] = None
+    drive_files: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def state_path(self) -> Path:
@@ -74,6 +78,47 @@ class Manifest:
             if it.local == local:
                 return it
         return None
+
+    def select_items(self, selectors: Optional[list[str]] = None) -> list[Item]:
+        """Resolve exact local paths, Drive IDs, or Drive/resource pairs.
+
+        A selector must identify one item. This prevents a mistyped path from
+        silently falling back to another registered item.
+        """
+        if not selectors:
+            return list(self.items)
+        selected: list[Item] = []
+        for selector in selectors:
+            matches = [
+                item for item in self.items
+                if selector in {
+                    item.local,
+                    item.drive_id,
+                    item.resource_id,
+                    (
+                        f"{item.drive_id}/{item.resource_id}"
+                        if item.resource_id is not None else ""
+                    ),
+                }
+            ]
+            if not matches:
+                raise ValueError(
+                    f"No registered item matches '{selector}'. "
+                    "Run `gwork item add --drive-id ID --type doc|sheet` "
+                    "to preview registration."
+                )
+            if len(matches) > 1:
+                choices = ", ".join(
+                    f"{item.local} ({item.drive_id}/{item.resource_id or '-'})"
+                    for item in matches
+                )
+                raise ValueError(
+                    f"Selector '{selector}' is ambiguous: {choices}. "
+                    "Use an exact local path or DRIVE_ID/RESOURCE_ID."
+                )
+            if matches[0] not in selected:
+                selected.append(matches[0])
+        return selected
 
     def account_for_gog(self, override: Optional[str] = None) -> Optional[str]:
         if self.transport.provider != "gog":
@@ -122,6 +167,9 @@ def load_manifest(root: Path) -> Manifest:
             local=raw["local"],
             drive_id=raw["drive_id"],
             type=raw["type"],
+            resource_id=str(raw.get("resource_id")) if raw.get("resource_id") is not None else None,
+            resource_title=raw.get("resource_title"),
+            drive_title=raw.get("drive_title"),
             sheet_tab=raw.get("sheet_tab"),
             headers_row=raw.get("headers_row", 1),
             data_start_row=raw.get("data_start_row", 2),
@@ -134,6 +182,46 @@ def load_manifest(root: Path) -> Manifest:
             doc_tab=raw.get("doc_tab"),
             transforms=transforms,
         ))
+    drive_files = data.get("files", []) or []
+    for drive_file in drive_files:
+        if drive_file.get("enabled", True) is False:
+            continue
+        common = {
+            key: value for key, value in drive_file.items()
+            if key not in {"resources", "directory", "title", "enabled"}
+        }
+        for resource in drive_file.get("resources", []) or []:
+            if resource.get("enabled", True) is False:
+                continue
+            raw = {**common, **resource}
+            transforms = [
+                Transform(
+                    name=t["name"],
+                    config={k: v for k, v in t.items() if k != "name"},
+                ) if isinstance(t, dict) else Transform(name=t)
+                for t in raw.get("transforms", [])
+            ]
+            item_type = drive_file["type"]
+            resource_id = str(resource["id"])
+            items.append(Item(
+                local=resource["local"],
+                drive_id=drive_file["drive_id"],
+                type=item_type,
+                resource_id=resource_id,
+                resource_title=resource.get("title"),
+                drive_title=drive_file.get("title"),
+                sheet_tab=resource.get("title") if item_type == "sheet" else None,
+                headers_row=raw.get("headers_row", 1),
+                data_start_row=raw.get("data_start_row", 2),
+                data_end_row=raw.get("data_end_row"),
+                key_column=raw.get("key_column"),
+                sync_mode=raw.get("sync_mode", "values_patch"),
+                protect_styling=bool(raw.get("protect_styling", False)),
+                link_mode=raw.get("link_mode"),
+                content_mode=raw.get("content_mode"),
+                doc_tab=resource_id if item_type == "doc" else None,
+                transforms=transforms,
+            ))
     return Manifest(
         client=data.get("client") or path.parent.name,
         drive_folder_id=data.get("drive_folder_id"),
@@ -147,4 +235,5 @@ def load_manifest(root: Path) -> Manifest:
         style=data.get("style", {}) or {},
         link_mode=data.get("link_mode"),
         content_mode=data.get("content_mode"),
+        drive_files=drive_files,
     )

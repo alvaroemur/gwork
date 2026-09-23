@@ -176,12 +176,14 @@ def cmd_fetch(
     manifest = load_manifest(root)
     account = manifest.account_for_gog(account)
     state = State(manifest.state_path)
-    only_set = set(only or [])
+    try:
+        selected_items = manifest.select_items(only)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 2
     results = []
 
-    for item in manifest.items:
-        if only_set and item.local not in only_set:
-            continue
+    for item in selected_items:
         entry = assess_item(manifest, item, state, account)
 
         if comments and item.type in ("doc", "sheet"):
@@ -282,13 +284,15 @@ def cmd_sync(
     manifest = load_manifest(root)
     account = manifest.account_for_gog(account)
     state = State(manifest.state_path)
-    only_set = set(only or [])
+    try:
+        selected_items = manifest.select_items(only)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 2
 
     console.print("[bold]sync · preflight fetch[/bold]")
     blockers = []
-    for item in manifest.items:
-        if only_set and item.local not in only_set:
-            continue
+    for item in selected_items:
         entry = assess_item(manifest, item, state, account)
         status = entry.get("sync_status")
         console.print(f"  {item.local}: [{status}]")
@@ -310,7 +314,7 @@ def cmd_sync(
         console.print()
 
     console.print("[bold]sync · plan[/bold]")
-    plan_rc = cmd_plan(root, account=account)
+    plan_rc = cmd_plan(root, account=account, only=only)
     if plan_rc != 0:
         return plan_rc
 

@@ -31,11 +31,16 @@ class StyleManifest:
         transport = self.raw.get("transport", {}) or {}
         items = self.raw.get("items", []) or []
         first_doc = next((item for item in items if item.get("type") == "doc"), {})
+        files = self.raw.get("files", []) or []
+        first_doc_file = next(
+            (item for item in files if item.get("type") == "doc"), {}
+        )
 
         self.doc_id: str = (
             self.style.get("document_id")
             or self.style.get("doc_id")
             or first_doc.get("drive_id", "")
+            or first_doc_file.get("drive_id", "")
         )
         self.title: str = self.style.get("title", "")
         self.account: Optional[str] = transport.get("account") or legacy_document.get("account")
