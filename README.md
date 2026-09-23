@@ -1,74 +1,100 @@
-# cowork-drivesync
+# gwork
 
-Sincroniza archivos locales CSV/MD a Google Drive (Sheets/Docs) con flujo tipo PR:
-`plan` produce un diff revisable, `apply` ejecuta tras aprobación.
+Sync local CSV and Markdown files with Google Drive (Sheets and Docs) through a
+review-first workflow. `plan` creates a reviewable diff; `apply` executes the
+approved plan.
 
-## Instalación
+## Installation
 
 ```
-cd ~/Dev/cowork-drivesync
+cd gwork
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```
 
-Pandoc debe estar instalado en el sistema (`brew install pandoc`).
+Pandoc must be installed (`brew install pandoc`).
 
-## Autenticación
+## Authentication
 
-Necesitas un OAuth client de tipo "desktop" en Google Cloud Console con las APIs Drive, Sheets y Docs habilitadas. Descarga el JSON y guárdalo en:
-
-```
-~/.config/cowork/drivesync/client_secret.json
-```
-
-La primera corrida abre el navegador para autorizar; el token se cachea en
-`~/.config/cowork/drivesync/token.json`.
-
-## Uso
+gwork uses the credentials managed by `gog-cli`. Authenticate the account
+before running gwork:
 
 ```
-cd ~/Cowork/inspiro/clientes/mifondo
-cowork sync fetch --comments --diff   # solo lectura: drift local/remoto, comentarios
-                                       # abiertos, diff aproximado — no escribe nada
-cowork sync plan        # lee manifiesto, compara local vs Drive, genera preview/
-                        # y decisions.yaml con las celdas ambiguas
-# revisar .drivesync/preview/decisions.yaml, resolver pendientes
-cowork sync apply       # ejecuta el plan: batchUpdate de Sheets, upload de Docs
-
-# o el atajo con preflight incorporado:
-cowork sync sync --apply   # fetch (preflight) → plan → apply; aborta si Drive
-                            # divergió del snapshot en vez de pisarlo
+gog auth login --account=user@example.com
 ```
 
-## Escritura de Docs: `content_mode`
+## Unified manifest
 
-Los items de tipo `doc` se escriben de dos maneras:
+Store transport, content items, and design tokens in `.gwork.yaml`:
 
-- `ast` (defecto) — construye el árbol nativo del Doc con `insertText` /
-  `insertTable` y `namedStyleType`. No reemplaza el archivo, así que márgenes,
-  pestañas y `namedStyles` sobreviven al push.
-- `docx_upload` — el camino histórico: sube un `.docx` de Pandoc y reemplaza el
-  archivo entero. Destructivo; requiere `--force-content-push` cuando el item
-  declara `protect_styling`.
+```yaml
+version: 1
+transport:
+  provider: gog
+  account: user@example.com
+items:
+  - local: docs/spec.md
+    drive_id: DOCUMENT_ID
+    type: doc
+    content_mode: ast
+  - local: data/matrix.csv
+    drive_id: SPREADSHEET_ID
+    type: sheet
+    key_column: id
+style:
+  document_id: DOCUMENT_ID
+  template_tab: _template
+  tokens: {}
+```
 
-Diseño y límites: [docs/insercion-ast.md](docs/insercion-ast.md).
-
-## Sistema de diseño de Google Docs (`cowork style`)
-
-Aplica un design system declarado en `.gdoc-sync.yaml` a un Doc gobernado:
+## Usage
 
 ```
-cowork style audit    # audita el doc contra el manifiesto, sin escribir
-cowork style plan     # dry-run: qué requests de batchUpdate saldrían
-cowork style apply    # purga separadores, calibra página y envía el lote atómico
-cowork style init     # crea un Doc nuevo con los namedStyles ya sembrados
+cd path/to/project
+gwork sync fetch --comments --diff  # Read-only drift, comments, and approximate diff.
+gwork sync plan                     # Compare local files with Drive and create
+                                    # preview/ plus decisions.yaml.
+# Review .gwork/preview/decisions.yaml and resolve pending cells.
+gwork sync apply                    # Apply the plan to Sheets and Docs.
+
+# Or run the full workflow with a preflight check:
+gwork sync sync --apply             # fetch → plan → apply; abort if Drive
+                                    # diverged from the snapshot.
 ```
 
-`init` es el único camino para que HEADING_1 y compañía lleven los tokens de
-marca: la Docs API no expone `updateNamedStyles`, así que un documento que ya
-existe solo admite el overlay de `apply`. Detalle en la skill `gdoc-style-sync`.
+## Docs writes: `content_mode`
 
-## Diagramas
+Doc items support two write modes:
 
-Ver `docs/arquitectura.html` (servir con `python3 -m http.server 8765 --directory docs/`).
+- `ast` (default) builds the native Doc tree with `insertText`, `insertTable`,
+  and `namedStyleType`. It preserves margins, tabs, and `namedStyles`.
+- `docx_upload` uploads a Pandoc `.docx` and replaces the whole file. Items with
+  `protect_styling` require `--force-content-push`.
+
+See [AST insertion](docs/ast-insertion.md) for design details and limits.
+
+## Google Docs design system (`gwork style`)
+
+Apply the design system declared in `.gwork.yaml` to a managed Doc:
+
+```
+gwork init --doc-id DOCUMENT_ID
+                      # Extract tokens and create or refresh _template.
+gwork style audit    # Refresh tokens and _template, then report drift.
+gwork style audit --no-refresh-template
+                      # Read-only audit against stored tokens.
+gwork style plan     # Preview the batchUpdate requests.
+gwork style apply    # Remove dividers, set page layout, and apply one batch.
+gwork style init     # Create a Doc with seeded namedStyles.
+```
+
+Top-level `init` inspects an existing Doc. `style init` creates a new Doc and is
+the only way to seed brand tokens into `HEADING_1` and other named styles. The
+Docs API does not expose `updateNamedStyles`, so existing documents only support
+the `apply` overlay.
+
+## Diagrams
+
+Open `docs/architecture.html`, or serve it with
+`python3 -m http.server 8765 --directory docs/`.

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-"""Siembra de `namedStyles` en un Google Doc nuevo.
+"""Seed ``namedStyles`` in a new Google Doc.
 
-La Docs API **no** expone `updateNamedStyles`: los estilos con nombre se leen en
-`documents.get` pero no se escriben por `batchUpdate` (la API responde
-`Unknown name "updateNamedStyles"`). Redefinir Heading 1 en un documento que ya
-existe es imposible por API; el único camino es sembrarlos al crear el
-documento, importando un `.docx` cuyos estilos de Word ya llevan los tokens.
+The Docs API does not expose ``updateNamedStyles``. Named styles can be read
+through ``documents.get`` but not written through ``batchUpdate``, which returns
+``Unknown name "updateNamedStyles"``. The API cannot redefine Heading 1 in an
+existing document. Instead, import a ``.docx`` whose Word styles already contain
+the tokens when creating the document.
 
-Límite conocido: Word solo tiene negrita binaria. Un `weight: 900` del
-manifiesto se importa como `weight=400` + bold. El peso numérico sigue
-necesitando overlay explícito (`cowork style apply`).
+Known limit: Word supports only binary bold. A manifest ``weight: 900`` imports
+as ``weight=400`` plus bold. The exact numeric weight still requires an explicit
+``gwork style apply`` overlay.
 """
 
 import re
@@ -25,7 +25,7 @@ from ..sync.gog import drive_upload
 from .manifest import StyleManifest
 from .tokens import is_bold_weight, parse_pt
 
-# scale del manifiesto → styleId de Word en el reference doc de pandoc
+# Manifest scale to Word styleId in the pandoc reference document.
 SCALE_TO_WORD_STYLE = {
     "title": "Title",
     "subtitle": "Subtitle",
@@ -62,18 +62,18 @@ ALIGNMENT_TO_WORD = {
     "RIGHT": "right",
 }
 
-# Esqueleto que ejercita cada estilo, para que el Doc importado los materialice.
+# Exercise each style so the imported Doc materializes it.
 DEFAULT_SKELETON = """% {title}
 
-# Encabezado de nivel 1
+# Level 1 heading
 
-Texto normal de referencia para fijar la tipografía base del documento.
+Reference body text that sets the document's base typography.
 
-## Encabezado de nivel 2
+## Level 2 heading
 
-### Encabezado de nivel 3
+### Level 3 heading
 
-#### Encabezado de nivel 4
+#### Level 4 heading
 """
 
 
@@ -143,7 +143,7 @@ def _replace_style(xml: str, style_id: str, block: str) -> str:
 
 
 def build_styles_xml(base_xml: str, manifest: StyleManifest) -> str:
-    """Reescribe `word/styles.xml` con los tokens del manifiesto."""
+    """Rewrite ``word/styles.xml`` with manifest tokens."""
     font = manifest.font_primary
     scales = manifest.scales
     normal_rule = scales.get("normal_text", {"size": 11, "weight": 400})
@@ -170,7 +170,7 @@ def build_styles_xml(base_xml: str, manifest: StyleManifest) -> str:
                          outline=OUTLINE_LEVEL.get(style_id)),
         )
 
-    # docDefaults: dejar la fuente por tema haría que Docs importe Calibri.
+    # docDefaults: a theme font would make Docs import Calibri.
     hp = _half_points(normal_rule.get("size", 11))
     xml = re.sub(
         r"<w:rPrDefault>.*?</w:rPrDefault>",
@@ -188,7 +188,7 @@ def build_styles_xml(base_xml: str, manifest: StyleManifest) -> str:
 
 
 def pandoc_reference_docx(out_path: Path) -> Path:
-    """Copia el reference.docx por defecto de pandoc."""
+    """Copy pandoc's default reference.docx."""
     result = subprocess.run(
         ["pandoc", "--print-default-data-file", "reference.docx"],
         capture_output=True, check=True,
@@ -199,7 +199,7 @@ def pandoc_reference_docx(out_path: Path) -> Path:
 
 def build_reference_docx(manifest: StyleManifest, out_path: Path,
                          base_docx: Optional[Path] = None) -> Path:
-    """Reference doc de pandoc con los estilos del manifiesto ya inyectados."""
+    """Build a pandoc reference document with manifest styles injected."""
     out_path = Path(out_path)
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(base_docx) if base_docx else pandoc_reference_docx(Path(tmp) / "ref.docx")
@@ -210,7 +210,7 @@ def build_reference_docx(manifest: StyleManifest, out_path: Path,
             if info.filename == "word/styles.xml":
                 styles = payload.decode("utf-8")
         if styles is None:
-            raise RuntimeError("%s no contiene word/styles.xml" % base)
+            raise RuntimeError("%s does not contain word/styles.xml" % base)
         patched = build_styles_xml(styles, manifest)
         with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
             for info, payload in entries:
@@ -235,8 +235,8 @@ def seed_document(manifest: StyleManifest, title: str,
                   parent: Optional[str] = None,
                   account: Optional[str] = None,
                   keep_dir: Optional[Path] = None) -> dict:
-    """Crea un Google Doc cuyos `namedStyles` ya son los del manifiesto."""
-    workdir = Path(keep_dir) if keep_dir else Path(tempfile.mkdtemp(prefix="cowork-style-"))
+    """Create a Google Doc whose ``namedStyles`` match the manifest."""
+    workdir = Path(keep_dir) if keep_dir else Path(tempfile.mkdtemp(prefix="gwork-style-"))
     workdir.mkdir(parents=True, exist_ok=True)
     try:
         reference = build_reference_docx(manifest, workdir / "reference.docx")

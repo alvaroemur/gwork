@@ -32,10 +32,10 @@ def fetch_doc_modified_time(drive_id: str, account: Optional[str] = None) -> str
 
 def fetch_doc_plain_text(drive_id: str, account: Optional[str] = None,
                          access_token: Optional[str] = None) -> str:
-    """Texto plano del cuerpo del Google Doc (párrafos concatenados).
+    """Return plain text from the Google Doc body with paragraphs joined.
 
-    Usado solo por `cowork sync fetch --diff` para un preview aproximado;
-    no participa del apply (que usa docs_ast / replace_doc_content_ast).
+    Used only by `gwork sync fetch --diff` for an approximate preview.
+    Apply uses docs_ast and replace_doc_content_ast instead.
     """
     if access_token is None:
         from .auth import get_access_token
@@ -73,17 +73,17 @@ def md_to_docx(md_path: Path, out_path: Optional[Path] = None) -> Path:
 def update_doc_content(drive_id: str, docx_path: Path,
                        account: Optional[str] = None,
                        access_token: Optional[str] = None) -> str:
-    """Reemplaza el contenido del Google Doc (drive_id) subiendo el docx.
+    """Replace Google Doc content by uploading the DOCX.
 
-    Usa la Drive API v3 directamente con el access_token de gog, ya que
-    gog drive upload no convierte .docx a Google Doc nativo.
+    Uses Drive API v3 directly with the gog access token because
+    `gog drive upload` does not convert DOCX to a native Google Doc.
 
-    Devuelve el nuevo modifiedTime.
+    Returns the new modifiedTime.
     """
     if access_token is None:
         from .auth import get_access_token
         from .gog import _run
-        # Inferir account desde gog si no se pasó
+        # Infer the account from gog when omitted.
         acct = account or _infer_account()
         access_token = get_access_token(acct)
 
@@ -100,7 +100,7 @@ def update_doc_content(drive_id: str, docx_path: Path,
 
 
 def _infer_account() -> str:
-    """Lee la cuenta autenticada del config de gog."""
+    """Read the authenticated account from the gog config."""
     import subprocess
     res = subprocess.run(
         ["gog", "auth", "list", "--json"],
@@ -111,37 +111,37 @@ def _infer_account() -> str:
         accounts = data if isinstance(data, list) else data.get("accounts", [])
         if accounts:
             return accounts[0].get("email", accounts[0]) if isinstance(accounts[0], dict) else accounts[0]
-    raise RuntimeError("No se pudo inferir la cuenta de gog. Pasa --account explícitamente.")
+    raise RuntimeError("Could not infer the gog account. Pass --account explicitly.")
 
 
 def replace_doc_content_ast(drive_id: str, md_text: str,
                             tab_id: Optional[str] = None,
                             account: Optional[str] = None,
                             code_font: str = docs_ast.CODE_FONT) -> str:
-    """Reemplaza el contenido de un Doc construyendo su árbol nativo.
+    """Replace Doc content by building its native document tree.
 
-    A diferencia de `update_doc_content`, no sube un archivo: emite
-    `deleteContentRange` + `insertText`/`insertTable` + estilos por
-    `batchUpdate`, de modo que márgenes, pestañas y `namedStyles` del documento
-    sobreviven y el contenido insertado los hereda.
+    Unlike `update_doc_content`, this emits `deleteContentRange`,
+    `insertText` or `insertTable`, and styles through `batchUpdate` instead
+    of uploading a file. Document margins, tabs, and `namedStyles` remain,
+    and inserted content inherits them.
 
-    Tres lotes, dos relecturas: el detalle de por qué está en `docs/insercion-ast.md`.
+    See `docs/ast-insertion.md` for the three-batch, two-read design.
     """
     blocks = docs_ast.markdown_to_blocks(md_text)
 
     raw = docs_raw(drive_id, tab_id=tab_id, account=account)
     requests = docs_ast.clear_body_requests(raw, tab_id)
     requests += docs_ast.insert_requests(blocks, tab_id)
-    batch_execute(drive_id, requests, account=account, source="cowork.sync.ast")
+    batch_execute(drive_id, requests, account=account, source="gwork.sync.ast")
 
     raw = docs_raw(drive_id, tab_id=tab_id, account=account)
     cell_requests = docs_ast.cell_text_requests(raw, blocks, tab_id)
     if cell_requests:
-        batch_execute(drive_id, cell_requests, account=account, source="cowork.sync.ast")
+        batch_execute(drive_id, cell_requests, account=account, source="gwork.sync.ast")
         raw = docs_raw(drive_id, tab_id=tab_id, account=account)
 
     style = docs_ast.style_requests(raw, blocks, tab_id, code_font=code_font)
     if style:
-        batch_execute(drive_id, style, account=account, source="cowork.sync.ast")
+        batch_execute(drive_id, style, account=account, source="gwork.sync.ast")
 
     return extract_modified_time(drive_get(drive_id, account))

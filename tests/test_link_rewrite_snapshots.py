@@ -1,12 +1,12 @@
-"""Tests de link rewriting y snapshots de apply."""
+"""Tests for link rewriting and apply snapshots."""
 
 from pathlib import Path
 
 import yaml
 
-from cowork.sync.manifest import Item, Manifest, load_manifest
-from cowork.sync.snapshots import save_doc_apply_snapshot, snapshot_dir
-from cowork.sync.transforms import apply_md_transforms, doc_transform_names, rewrite_links
+from gwork.sync.manifest import Item, Manifest, load_manifest
+from gwork.sync.snapshots import save_doc_apply_snapshot, snapshot_dir
+from gwork.sync.transforms import apply_md_transforms, doc_transform_names, rewrite_links
 
 
 def _manifest(root: Path, link_mode: str = "rewrite_to_drive") -> Manifest:
@@ -40,7 +40,7 @@ def test_rewrite_links_resolves_relative_md_and_csv(tmp_path: Path):
     root = tmp_path
     (root / "docs").mkdir()
     (root / "docs" / "a.md").write_text(
-        "Ver [otro doc](b.md) y [sheet](data.csv).\n",
+        "See [another doc](b.md) and [sheet](data.csv).\n",
         encoding="utf-8",
     )
     manifest = _manifest(root)
@@ -67,7 +67,7 @@ def test_doc_transform_names_preserves_explicit_transforms(tmp_path: Path):
         local="docs/x.md",
         drive_id="DOC_X",
         type="doc",
-        transforms=[__import__("cowork.sync.manifest", fromlist=["Transform"]).Transform(name="strip_internal")],
+        transforms=[__import__("gwork.sync.manifest", fromlist=["Transform"]).Transform(name="strip_internal")],
     )
     assert doc_transform_names(manifest, item) == ["strip_internal"]
 
@@ -87,7 +87,7 @@ def test_apply_md_transforms_via_link_mode(tmp_path: Path):
 
 
 def test_load_manifest_link_mode(tmp_path: Path):
-    (tmp_path / ".drivesync.yaml").write_text(
+    (tmp_path / ".gwork.yaml").write_text(
         yaml.dump(
             {
                 "client": "demo",
@@ -105,32 +105,32 @@ def test_load_manifest_link_mode(tmp_path: Path):
 
 
 def test_save_doc_apply_snapshot_writes_md_and_sidecar(tmp_path: Path):
-    local = "docs/entregables/requisitos_v2/00_principal.md"
+    local = "docs/deliverables/requirements_v2/00_main.md"
     applied_at = "2026-05-27T18:30:00Z"
     md_path = save_doc_apply_snapshot(
         tmp_path,
         local,
         "DRIVE123",
-        "# Contenido aplicado\n",
+        "# Applied content\n",
         local_hash="sha256:abc",
         remote_modified_time="2026-05-27T18:30:05Z",
         account="test@example.com",
         applied_at=applied_at,
     )
     assert md_path == snapshot_dir(tmp_path, local) / f"{applied_at}.md"
-    assert md_path.read_text(encoding="utf-8") == "# Contenido aplicado\n"
+    assert md_path.read_text(encoding="utf-8") == "# Applied content\n"
     meta = (md_path.parent / f"{applied_at}.json").read_text(encoding="utf-8")
     assert '"drive_id": "DRIVE123"' in meta
     assert '"local_hash": "sha256:abc"' in meta
     assert '"account": "test@example.com"' in meta
 
 
-def test_content_mode_por_defecto_es_ast(tmp_path):
+def test_content_mode_defaults_to_ast(tmp_path):
     manifest = _manifest(tmp_path)
     assert manifest.effective_content_mode(manifest.items[0]) == "ast"
 
 
-def test_content_mode_del_item_gana_al_del_manifiesto(tmp_path):
+def test_item_content_mode_overrides_manifest(tmp_path):
     manifest = _manifest(tmp_path)
     manifest.content_mode = "docx_upload"
     assert manifest.effective_content_mode(manifest.items[0]) == "docx_upload"
@@ -138,8 +138,8 @@ def test_content_mode_del_item_gana_al_del_manifiesto(tmp_path):
     assert manifest.effective_content_mode(manifest.items[0]) == "ast"
 
 
-def test_load_manifest_lee_content_mode_y_doc_tab(tmp_path):
-    (tmp_path / ".drivesync.yaml").write_text(
+def test_load_manifest_reads_content_mode_and_doc_tab(tmp_path):
+    (tmp_path / ".gwork.yaml").write_text(
         "client: c\n"
         "content_mode: docx_upload\n"
         "items:\n"

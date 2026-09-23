@@ -19,7 +19,7 @@ def read_decisions(path: Path) -> dict:
 
 
 def has_pending(doc: dict) -> list[str]:
-    """Devuelve descripciones de items con decisiones sin resolver."""
+    """Return descriptions of items with unresolved decisions."""
     pending = []
     for it in doc.get("items", []):
         for p in it.get("pending", []):

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""Traduce un plan de `StyleSyncEngine` a requests de `documents.batchUpdate`.
+"""Translate a ``StyleSyncEngine`` plan into ``documents.batchUpdate`` requests.
 
-Ninguna de estas requests altera la longitud del texto, así que los índices del
-plan siguen siendo válidos durante todo el lote. Las mutaciones estructurales
-(borrar separadores) se ejecutan antes, en otra fase.
+These requests do not change text length, so plan indices remain valid for the
+entire batch. Structural mutations, such as deleting dividers, run first in a
+separate phase.
 """
 
 from .tokens import hex_to_rgb
@@ -57,7 +57,7 @@ def _row_style_request(tab_id, t_start: int, row: int, cols: int,
 
 def build_requests(plan: dict, tab_id=None, restore_table_widths: bool = True,
                    cell_padding: dict = None, header_padding: dict = None) -> list:
-    """Compila el lote atómico de estilos para una pestaña."""
+    """Compile the atomic style batch for one tab."""
     cell_padding = cell_padding or {"top": 3.5, "bottom": 3.5, "left": 4.5, "right": 4.5}
     header_padding = header_padding or {"top": 4.0, "bottom": 4.0, "left": 5.0, "right": 5.0}
     requests: list = []

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-"""Markdown → requests de `documents.batchUpdate`, sin pasar por `.docx`.
+"""Convert Markdown to `documents.batchUpdate` requests without DOCX.
 
-El camino histórico (`update_doc_content`) hace `PATCH files/{id}?uploadType=media`
-con un `.docx` entero: no "pierde estilos", reemplaza el archivo completo y
-destruye pestañas, márgenes y `namedStyles` en cada push. Este módulo construye
-en su lugar el árbol nativo del documento: `insertText` + `insertTable` y
-asignación directa de `namedStyleType`, de modo que el estilo preconfigurado del
-Doc sobrevive y lo insertado lo hereda.
+The legacy path (`update_doc_content`) sends the entire DOCX through
+`PATCH files/{id}?uploadType=media`. It replaces the file rather than merely
+losing styles, destroying tabs, margins, and `namedStyles` on every push.
+This module builds the native document tree with `insertText`, `insertTable`,
+and direct `namedStyleType` assignment. Existing Doc styles remain, and
+inserted content inherits them.
 
-Diseño completo (fases, aritmética de índices, tablas, enlaces):
-`docs/insercion-ast.md`.
+See `docs/ast-insertion.md` for phases, index arithmetic, tables, and links.
 """
 
 import json
@@ -35,23 +34,23 @@ CODE_FONT = "Courier New"
 
 
 class UnsupportedNode(Exception):
-    """Un nodo del AST no tiene traducción fiel a la Docs API.
+    """An AST node has no faithful Docs API translation.
 
-    Se prefiere fallar ruidosamente antes que degradar el documento en silencio:
-    quien lo encuentre puede volver al camino `.docx` con `content_mode: docx_upload`.
+    Fail explicitly instead of silently degrading the document. Callers can
+    use the DOCX path with `content_mode: docx_upload`.
     """
 
 
 def u16len(text: str) -> int:
-    """Longitud en unidades UTF-16, que es como la Docs API cuenta los índices.
+    """Return the UTF-16 length used for Docs API indexes.
 
-    Importa para emoji y demás caracteres fuera del BMP: ocupan dos unidades.
+    Emoji and other non-BMP characters occupy two units.
     """
     return len(text.encode("utf-16-le")) // 2
 
 
 # =====================================================================
-#  Modelo intermedio
+#  Intermediate model
 # =====================================================================
 
 @dataclass
@@ -101,7 +100,7 @@ class Table:
 
 
 # =====================================================================
-#  Pandoc AST → modelo
+#  Pandoc AST → model
 # =====================================================================
 
 def markdown_to_pandoc_ast(text: str) -> dict:
@@ -180,15 +179,15 @@ def _convert_block(node: dict, nesting: int = 0, quote: bool = False) -> list:
         return out
 
     if kind == "HorizontalRule":
-        # Los separadores se descartan: `cowork style` los purga por diseño.
+        # Drop separators because `gwork style` removes them by design.
         return []
 
     if kind == "Table":
         return [_convert_table(payload)]
 
     raise UnsupportedNode(
-        f"El bloque Markdown '{kind}' no tiene traducción a la Docs API. "
-        f"Usa content_mode: docx_upload para este item."
+        f"Markdown block '{kind}' has no Docs API translation. "
+        f"Use content_mode: docx_upload for this item."
     )
 
 
@@ -227,13 +226,13 @@ def _rows(raw_rows: list) -> list:
             _cattr, _align, rowspan, colspan, blocks = cell
             if rowspan != 1 or colspan != 1:
                 raise UnsupportedNode(
-                    "Las celdas combinadas (rowspan/colspan) no se insertan por AST."
+                    "Merged cells (rowspan/colspan) cannot be inserted through the AST."
                 )
             paragraphs: list = []
             for block in blocks:
                 for converted in _convert_block(block):
                     if not isinstance(converted, Paragraph):
-                        raise UnsupportedNode("Una celda contiene una tabla anidada.")
+                        raise UnsupportedNode("A cell contains a nested table.")
                     paragraphs.append(converted)
             cells.append(paragraphs or [Paragraph()])
         out.append(cells)
@@ -260,8 +259,8 @@ def _inline(node: dict, **style) -> list:
     if kind == "Space":
         return [Run(text=" ", **style)]
     if kind in ("SoftBreak", "LineBreak"):
-        # Un salto duro dentro de un párrafo se aplana a espacio: insertar "\n"
-        # abriría un párrafo nuevo y desalinearía el modelo con el documento.
+        # Flatten a hard break to a space. Inserting "\n" would start a new
+        # paragraph and misalign the model with the document.
         return [Run(text=" ", **style)]
     if kind == "Emph":
         return _inlines(payload, **dict(style, italic=True))
@@ -285,8 +284,8 @@ def _inline(node: dict, **style) -> list:
         return [Run(text=open_q, **style)] + inner + [Run(text=close_q, **style)]
 
     raise UnsupportedNode(
-        f"El inline Markdown '{kind}' no tiene traducción a la Docs API. "
-        f"Usa content_mode: docx_upload para este item."
+        f"Markdown inline '{kind}' has no Docs API translation. "
+        f"Use content_mode: docx_upload for this item."
     )
 
 
@@ -301,7 +300,7 @@ def _merge_runs(runs: list) -> list:
 
 
 # =====================================================================
-#  Modelo → requests de batchUpdate
+#  Model → batchUpdate requests
 # =====================================================================
 
 def _location(tab_id: Optional[str], index: int) -> dict:
@@ -319,7 +318,7 @@ def _range(tab_id: Optional[str], start: int, end: int) -> dict:
 
 
 def segment_blocks(blocks: list) -> list:
-    """Parte el documento en tramos de texto y tablas, en orden."""
+    """Split the document into ordered text and table segments."""
     segments: list = []
     buffer: list = []
     for block in blocks:
@@ -340,7 +339,7 @@ def segment_text(paragraphs: list) -> str:
 
 
 def clear_body_requests(tab_raw: dict, tab_id: Optional[str] = None) -> list:
-    """Vacía el cuerpo de la pestaña conservando el párrafo final obligatorio."""
+    """Clear the tab body while preserving the required final paragraph."""
     content = (tab_raw.get("body", {}) or {}).get("content", []) or []
     end = max((el.get("endIndex", 1) for el in content), default=1)
     if end <= 2:
@@ -350,11 +349,11 @@ def clear_body_requests(tab_raw: dict, tab_id: Optional[str] = None) -> list:
 
 def insert_requests(blocks: list, tab_id: Optional[str] = None,
                     index: int = 1) -> list:
-    """Fase 1: inserta texto y tablas vacías.
+    """Phase 1: insert text and empty tables.
 
-    Todo se inserta en el mismo índice y en orden inverso al del documento: cada
-    inserción empuja a la derecha lo ya insertado, así que el orden final es el
-    correcto y ningún índice calculado se invalida a mitad del lote.
+    Insert everything at the same index in reverse document order. Each insert
+    shifts existing content right, preserving final order without invalidating
+    calculated indexes during the batch.
     """
     requests: list = []
     for kind, payload in reversed(segment_blocks(blocks)):
@@ -384,11 +383,10 @@ def _element_text(element: dict) -> str:
 
 
 def match_blocks(tab_raw: dict, blocks: list) -> list:
-    """Empareja cada bloque del modelo con su elemento en el documento vivo.
+    """Match each model block to its element in the live document.
 
-    Docs agrega párrafos vacíos por su cuenta (por ejemplo después de una tabla),
-    así que el emparejamiento avanza saltando lo que no corresponde en vez de
-    asumir posiciones fijas.
+    Docs adds empty paragraphs, such as after a table. Skip unrelated elements
+    instead of assuming fixed positions.
     """
     content = (tab_raw.get("body", {}) or {}).get("content", []) or []
     pairs: list = []
@@ -407,18 +405,18 @@ def match_blocks(tab_raw: dict, blocks: list) -> list:
                     break
         else:
             raise RuntimeError(
-                f"No se encontró en el documento el bloque {block!r}; "
-                f"el contenido remoto no coincide con lo insertado."
+                f"Block {block!r} was not found in the document; "
+                f"remote content does not match inserted content."
             )
     return pairs
 
 
 def cell_text_requests(tab_raw: dict, blocks: list,
                        tab_id: Optional[str] = None) -> list:
-    """Fase 2: llena las celdas, de la última a la primera.
+    """Phase 2: fill cells from last to first.
 
-    Cada inserción desplaza todo lo que viene después, así que recorrer en orden
-    inverso mantiene válidos los índices leídos de una sola vez.
+    Each insert shifts later content. Reverse traversal keeps indexes from one
+    read valid.
     """
     inserts: list = []
     for block, element in match_blocks(tab_raw, blocks):
@@ -471,11 +469,11 @@ def _paragraph_style(paragraph: Paragraph) -> tuple:
 
 def style_requests(tab_raw: dict, blocks: list, tab_id: Optional[str] = None,
                    code_font: str = CODE_FONT) -> list:
-    """Fase 3: estilos de párrafo, de carácter y viñetas.
+    """Phase 3: apply paragraph, character, and bullet styles.
 
-    Ninguna de estas requests cambia la longitud del texto, así que los índices
-    leídos una vez valen para todo el lote. `createParagraphBullets` va al final
-    porque es la única que puede tocar el texto (recorta marcadores previos).
+    These requests do not change text length, so one set of indexes remains
+    valid for the batch. `createParagraphBullets` runs last because it alone
+    can modify text by trimming existing markers.
     """
     requests: list = []
     bullets: list = []

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Git post-commit hook para cowork-drivesync.
-# Instalalo copiando a .git/hooks/post-commit en el repo de Cowork y dándole +x.
-# Avisa cuando un commit toca archivos en .../clientes/*/Analisis/entregables/.
-# No ejecuta sync; sólo recuerda correr `cowork sync plan`.
+# Git post-commit hook for gwork.
+# Copy it to .git/hooks/post-commit in the target repository and make it executable.
+# It warns when a commit changes files under .../clientes/*/Analisis/entregables/.
+# It does not run sync; it only suggests `gwork sync plan`.
 
 set -eu
 
@@ -12,9 +12,9 @@ changed="$(git diff --name-only HEAD~1 HEAD 2>/dev/null | \
 if [ -n "$changed" ]; then
   clients="$(echo "$changed" | awk -F'/clientes/' '{print $2}' | awk -F'/' '{print $1}' | sort -u)"
   echo ""
-  echo "⚠️  drivesync: el commit toca entregables. Considera correr:"
+  echo "⚠️  gwork: this commit changes deliverables. Consider running:"
   for c in $clients; do
-    echo "    cd clientes/$c && cowork sync plan"
+    echo "    cd clientes/$c && gwork sync plan"
   done
   echo ""
 fi

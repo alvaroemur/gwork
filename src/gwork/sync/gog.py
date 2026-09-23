@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-"""Wrapper de subprocess para gog-cli.
+"""Subprocess wrapper for gog-cli.
 
-Todas las llamadas usan --json --no-input para output machine-parseable.
-El account se pasa como --account EMAIL cuando se especifica.
+All calls use --json --no-input for machine-readable output.
+When specified, the account is passed as --account EMAIL.
 """
 
 import json
@@ -18,28 +18,28 @@ class GogError(Exception):
 
 
 def _run(args: list[str], account: Optional[str] = None) -> Any:
-    """Ejecuta un comando gog y devuelve el JSON parseado."""
+    """Run a gog command and return parsed JSON."""
     cmd = ["gog", "--json", "--no-input"]
     if account:
         cmd += ["--account", account]
     cmd += args
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise GogError(f"gog {' '.join(args)} falló (código {result.returncode}):\n{result.stderr.strip()}")
+        raise GogError(f"gog {' '.join(args)} failed (code {result.returncode}):\n{result.stderr.strip()}")
     if not result.stdout.strip():
         return None
     return json.loads(result.stdout)
 
 
 def _run_plain(args: list[str], account: Optional[str] = None) -> str:
-    """Ejecuta un comando gog sin --json, devuelve stdout crudo."""
+    """Run a gog command without --json and return raw stdout."""
     cmd = ["gog", "--no-input"]
     if account:
         cmd += ["--account", account]
     cmd += args
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise GogError(f"gog {' '.join(args)} falló (código {result.returncode}):\n{result.stderr.strip()}")
+        raise GogError(f"gog {' '.join(args)} failed (code {result.returncode}):\n{result.stderr.strip()}")
     return result.stdout
 
 
@@ -65,7 +65,7 @@ def sheets_update_cell(spreadsheet_id: str, a1: str, value: str,
 
 def sheets_update_range(spreadsheet_id: str, a1: str, values: list[list[str]],
                         account: Optional[str] = None) -> None:
-    """Actualiza un rango con una matriz 2D."""
+    """Update a range with a 2D matrix."""
     _run(["sheets", "update", spreadsheet_id, a1,
           "--values-json", json.dumps(values)], account)
 
@@ -88,7 +88,7 @@ def drive_get(file_id: str, account: Optional[str] = None) -> dict:
 
 
 def extract_modified_time(meta: Optional[dict]) -> str:
-    """Lee modifiedTime de respuestas gog (top-level o bajo `file`)."""
+    """Read modifiedTime from top-level or nested `file` gog responses."""
     if not meta:
         return ""
     if meta.get("modifiedTime"):
@@ -145,7 +145,7 @@ def docs_copy(doc_id: str, title: str, parent: Optional[str] = None,
 
 def docs_raw(doc_id: str, tab_id: Optional[str] = None,
              all_tabs: bool = False, account: Optional[str] = None) -> dict:
-    """Documents.Get crudo. Con tab_id los índices son locales a la pestaña."""
+    """Return raw Documents.Get output. tab_id makes indexes tab-local."""
     args = ["docs", "raw", doc_id]
     if tab_id:
         args.append(f"--tab={tab_id}")
@@ -159,6 +159,25 @@ def docs_list_tabs(doc_id: str, account: Optional[str] = None) -> list:
     if isinstance(data, list):
         return data
     return data.get("tabs", []) if data else []
+
+
+def docs_add_tab(doc_id: str, title: str,
+                 account: Optional[str] = None) -> dict:
+    return _run(["docs", "add-tab", doc_id, f"--title={title}"], account)
+
+
+def docs_write_markdown(doc_id: str, tab: str, markdown_path: Path,
+                        account: Optional[str] = None) -> dict:
+    return _run(
+        [
+            "docs", "write", doc_id,
+            f"--tab={tab}",
+            f"--file={markdown_path}",
+            "--markdown",
+            "--replace",
+        ],
+        account,
+    )
 
 
 def docs_delete_range(doc_id: str, tab_id: Optional[str], start: int, end: int,
@@ -191,11 +210,11 @@ def docs_pin_table_header(doc_id: str, tab_id: Optional[str], table_index: int =
 
 
 # ---------------------------------------------------------------------------
-# Batch persistido (Docs API batchUpdate con requests crudas)
+# Persisted batch (Docs API batchUpdate with raw requests)
 # ---------------------------------------------------------------------------
 
 def batch_dir() -> Path:
-    """Directorio de batches persistidos de gog."""
+    """Return the directory for persisted gog batches."""
     candidates = []
     gog_home = os.environ.get("GOG_HOME")
     if gog_home:
@@ -211,12 +230,12 @@ def batch_dir() -> Path:
 
 
 def batch_execute(doc_id: str, requests: list, account: Optional[str] = None,
-                  source: str = "cowork.style") -> dict:
-    """Somete una lista de requests crudas de la Docs API en un solo batchUpdate.
+                  source: str = "gwork.style") -> dict:
+    """Submit raw Docs API requests in one batchUpdate.
 
-    gog no expone banderas para toda la superficie de la API (borderBottom,
-    updateTableColumnProperties, …), pero `gog batch` persiste el lote en un
-    JSON que se amplía con requests literales antes de enviarlo.
+    gog lacks flags for the full API surface, including borderBottom and
+    updateTableColumnProperties. `gog batch` persists the batch as JSON,
+    which this function extends with literal requests before submission.
     """
     if not requests:
         return {"requests": 0, "status": "empty"}

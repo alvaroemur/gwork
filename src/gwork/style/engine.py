@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-"""Análisis de una pestaña viva contra el manifiesto de diseño.
+"""Analyze a live tab against the design manifest.
 
-`analyze` es puro: recibe el JSON crudo de `Documents.Get` (o de una pestaña) y
-devuelve un plan declarativo. El transporte y la escritura viven fuera.
+``analyze`` is pure: it accepts raw ``Documents.Get`` JSON, or one tab, and
+returns a declarative plan. Transport and writes remain outside this module.
 """
 
 import re
@@ -19,10 +19,10 @@ from .tokens import (
     rgb_to_hex,
 )
 
-BADGE_RE = re.compile(r"\[(ESTADO|STATUS|FASE|PRIORIDAD|ROL):?\s*[^\]]+\]", re.IGNORECASE)
+BADGE_RE = re.compile(r"\[(STATE|STATUS|PHASE|PRIORITY|ROLE):?\s*[^\]]+\]", re.IGNORECASE)
 DIVIDER_RE = re.compile(r"^[-–—\s]{3,}$")
 CALLOUT_HINT_RE = re.compile(
-    r"\b(callout|alerta|advertencia|nota|importante|recomendaci[óo]n)\b", re.IGNORECASE
+    r"\b(callout|alert|warning|note|important|recommendation)\b", re.IGNORECASE
 )
 CALLOUT_ICONS = ("💡", "⚠️", "📌")
 HEADING_ELEMENTS = ("title", "subtitle", "heading_1", "heading_2", "heading_3", "heading_4")
@@ -50,12 +50,12 @@ def empty_plan(tab_id: str, tab_title: str) -> dict:
 
 
 class StyleSyncEngine:
-    """Cataloga desviaciones entre una pestaña y el sistema de diseño."""
+    """Catalog deviations between a tab and the design system."""
 
     def __init__(self, manifest: StyleManifest):
         self.manifest = manifest
 
-    # -- entrada principal -------------------------------------------------
+    # -- main entry point --------------------------------------------------
 
     def analyze(self, tab_raw: dict, tab_id: str, tab_title: str) -> dict:
         plan = empty_plan(tab_id, tab_title)
@@ -84,7 +84,7 @@ class StyleSyncEngine:
             actual = (doc_style.get(f"margin{edge.capitalize()}", {}) or {}).get("magnitude", 0.0)
             if abs(actual - expected) > 1.0:
                 plan["audit_issues"].append(
-                    f"Margen {edge}: esperado {expected}pt, actual {actual}pt"
+                    f"Margin {edge}: expected {expected}pt, actual {actual}pt"
                 )
         plan["page_layout"] = {
             "size": self.manifest.page_layout.get("size", "Letter"),
@@ -92,7 +92,7 @@ class StyleSyncEngine:
             "printable_width": self.manifest.printable_width,
         }
 
-    # -- jerarquía ---------------------------------------------------------
+    # -- hierarchy ---------------------------------------------------------
 
     def _locate_title_and_subtitle(self, content: list) -> tuple:
         title_idx: Optional[int] = None
@@ -118,7 +118,7 @@ class StyleSyncEngine:
 
     def _resolve_scale(self, named_style: str, text: str, idx: int,
                        title_idx: Optional[int], subtitle_idx: Optional[int]) -> tuple:
-        """Devuelve (scale_key, namedStyleType objetivo) para un párrafo."""
+        """Return the target ``(scale_key, namedStyleType)`` for a paragraph."""
         if idx == subtitle_idx or named_style == "SUBTITLE":
             return "subtitle", "SUBTITLE"
         if idx == title_idx or named_style == "TITLE":
@@ -151,7 +151,7 @@ class StyleSyncEngine:
             return "normal_text", "NORMAL_TEXT"
         return None, named_style
 
-    # -- párrafos ----------------------------------------------------------
+    # -- paragraphs --------------------------------------------------------
 
     def _analyze_paragraph(self, el: dict, idx: int, plan: dict,
                            title_idx: Optional[int], subtitle_idx: Optional[int]) -> None:
@@ -169,7 +169,7 @@ class StyleSyncEngine:
         if DIVIDER_RE.match(text):
             plan["dividers_to_remove"].append({"start": p_start, "end": p_end, "text": text})
             plan["audit_issues"].append(
-                f"Separador residual detectado en [{p_start}:{p_end}]: {text!r}"
+                f"Residual divider found at [{p_start}:{p_end}]: {text!r}"
             )
             return
 
@@ -186,12 +186,47 @@ class StyleSyncEngine:
             self._plan_callout(text, p_style, p_start, p_end, plan)
             return
 
+        eyebrow = self.manifest.components.get("eyebrow", {}) or {}
+        if (
+            eyebrow
+            and named_style == "NORMAL_TEXT"
+            and len(text) <= 48
+            and text.upper() == text
+            and any(char.isalpha() for char in text)
+        ):
+            self._plan_eyebrow(eyebrow, p_style, p_start, p_end, plan)
+            return
+
         scale_key, target_named = self._resolve_scale(named_style, text, idx, title_idx, subtitle_idx)
         if scale_key and scale_key in self.manifest.scales:
             self._plan_scale(scale_key, target_named, named_style, text, p_style,
                              runs, p_start, p_end, plan)
 
         self._plan_character_tokens(p_text, runs, p_start, plan)
+
+    def _plan_eyebrow(self, token: dict, paragraph_style: dict,
+                       start: int, end: int, plan: dict) -> None:
+        alignment = token.get("alignment")
+        if alignment and paragraph_style.get("alignment", "START") != alignment:
+            plan["paragraph_updates"].append({
+                "start": start,
+                "end": end,
+                "fields": "alignment",
+                "paragraphStyle": {"alignment": alignment},
+                "style_name": "eyebrow",
+                "text_sample": "",
+            })
+        plan["text_updates"].append({
+            "start": start,
+            "end": end,
+            "font_family": token.get("font", self.manifest.font_primary),
+            "size": token.get("size"),
+            "color": token.get("color"),
+            "bg_color": token.get("background"),
+            "bold": token.get("weight", 400) >= 700,
+            "is_heading": True,
+            "style_name": "eyebrow",
+        })
 
     def _is_callout(self, text: str, p_style: dict) -> bool:
         indent = (p_style.get("indentStart", {}) or {}).get("magnitude", 0.0)
@@ -221,10 +256,10 @@ class StyleSyncEngine:
             border_col, ((cur_border.get("color", {}) or {}).get("color", {}) or {}).get("rgbColor")
         ):
             plan["audit_issues"].append(
-                f"Callout en [{p_start}:{p_end}] carece de borde lateral {border_col}"
+                f"Callout at [{p_start}:{p_end}] lacks left border {border_col}"
             )
         if not cur_shading or not colors_match(bg, cur_shading):
-            plan["audit_issues"].append(f"Callout en [{p_start}:{p_end}] carece de fondo {bg}")
+            plan["audit_issues"].append(f"Callout at [{p_start}:{p_end}] lacks background {bg}")
 
         plan["callout_updates"].append({
             "start": p_start,
@@ -250,7 +285,7 @@ class StyleSyncEngine:
             style_req["namedStyleType"] = target_named
             fields.append("namedStyleType")
             plan["audit_issues"].append(
-                f"{text[:30]}: estilo actual {named_style} != objetivo {target_named}"
+                f"{text[:30]}: current style {named_style} != target {target_named}"
             )
 
         expected_align = rule.get("alignment")
@@ -260,7 +295,7 @@ class StyleSyncEngine:
                 style_req["alignment"] = expected_align
                 fields.append("alignment")
                 plan["audit_issues"].append(
-                    f"{scale_key} en [{p_start}:{p_end}]: alineación {current} != {expected_align}"
+                    f"{scale_key} at [{p_start}:{p_end}]: alignment {current} != {expected_align}"
                 )
 
         for key, api_field in (("space_above", "spaceAbove"), ("space_below", "spaceBelow")):
@@ -273,7 +308,7 @@ class StyleSyncEngine:
                 fields.append(api_field)
                 if abs(current - expected) > 1.0:
                     plan["audit_issues"].append(
-                        f"{scale_key} en [{p_start}:{p_end}]: {api_field} {current}pt != {expected}pt"
+                        f"{scale_key} at [{p_start}:{p_end}]: {api_field} {current}pt != {expected}pt"
                     )
 
         if "line_spacing" in rule:
@@ -296,7 +331,7 @@ class StyleSyncEngine:
             )
             if not matches:
                 plan["audit_issues"].append(
-                    f"Heading 3 en [{p_start}:{p_end}] carece de borde inferior {bb_color}"
+                    f"Heading 3 at [{p_start}:{p_end}] lacks bottom border {bb_color}"
                 )
             style_req["borderBottom"] = {
                 "color": {"color": {"rgbColor": hex_to_rgb(bb_color)}},
@@ -346,7 +381,7 @@ class StyleSyncEngine:
             style = tr.get("textStyle", {}) or {}
             if style.get("link"):
                 continue
-            # Badges y código técnico van a 9pt por diseño; no son desviaciones.
+            # Badges and technical code use 9pt by design; they are not deviations.
             if BADGE_RE.search(text) or style.get("backgroundColor"):
                 continue
 
@@ -357,12 +392,12 @@ class StyleSyncEngine:
             if font and font not in (font_primary, font_code):
                 plan["audit_issues"].append(
                     f"{scale_key} [{r.get('startIndex')}:{r.get('endIndex')}]: "
-                    f"fuente '{font}' != '{font_primary}'"
+                    f"font '{font}' != '{font_primary}'"
                 )
             if size and expected_size and abs(size - expected_size) > 0.5:
                 plan["audit_issues"].append(
                     f"{scale_key} [{r.get('startIndex')}:{r.get('endIndex')}]: "
-                    f"tamaño {size}pt != {expected_size}pt"
+                    f"size {size}pt != {expected_size}pt"
                 )
             if is_heading and expected_color and color and not colors_match(expected_color, color):
                 plan["audit_issues"].append(
@@ -370,7 +405,7 @@ class StyleSyncEngine:
                     f"color {rgb_to_hex(color)} != {expected_color}"
                 )
 
-    # -- tokens de carácter ------------------------------------------------
+    # -- character tokens --------------------------------------------------
 
     def _plan_character_tokens(self, p_text: str, runs: list, p_start: int, plan: dict) -> None:
         font_primary = self.manifest.font_primary
@@ -398,8 +433,8 @@ class StyleSyncEngine:
                 plan["text_updates"].append(self._code_update(
                     r["startIndex"] + match.start(), r["startIndex"] + match.end(), font_code
                 ))
-            # La importación Markdown de Docs come los backticks y deja Courier New:
-            # hay que reconocer también ese caso o se pierden los fragmentos técnicos.
+            # Docs Markdown import removes backticks and leaves Courier New.
+            # Recognize that case to preserve technical fragments.
             already_code = (
                 (tr.get("textStyle", {}) or {}).get("weightedFontFamily", {}) or {}
             ).get("fontFamily") == font_code
@@ -436,7 +471,7 @@ class StyleSyncEngine:
             "style_name": "technical_word",
         }
 
-    # -- tablas ------------------------------------------------------------
+    # -- tables ------------------------------------------------------------
 
     def _analyze_table(self, el: dict, table_index: int, plan: dict) -> None:
         table = el["table"]
@@ -471,8 +506,8 @@ class StyleSyncEngine:
 
         if not widths_conform(col_props, num_cols, sum(existing), printable_w):
             plan["audit_issues"].append(
-                f"Tabla #{table_index} [{t_start}]: anchos no fijados a {printable_w}pt "
-                f"(actual {sum(existing):.1f}pt)"
+                f"Table #{table_index} [{t_start}]: widths not fixed to {printable_w}pt "
+                f"(actual: {sum(existing):.1f}pt)"
             )
 
         font_primary = self.manifest.font_primary
@@ -485,7 +520,7 @@ class StyleSyncEngine:
                         first_text += _paragraph_text(c_el["paragraph"])
             lowered = first_text.lower()
             is_summary = (
-                "total" in lowered or "resumen" in lowered or "suma" in lowered
+                "total" in lowered or "summary" in lowered or "sum" in lowered
                 or (r_idx == num_rows - 1 and num_rows > 3)
             )
             cell_bg = self._first_cell_bg(cells)
@@ -493,14 +528,14 @@ class StyleSyncEngine:
             if r_idx == 0:
                 if not colors_match(header_bg, cell_bg):
                     plan["audit_issues"].append(
-                        f"Tabla #{table_index}: cabecera carece de color {header_bg}"
+                        f"Table #{table_index}: header lacks color {header_bg}"
                     )
                 self._collect_cell_runs(cells, table_plan, font_primary, header_text, True)
             elif is_summary:
                 table_plan["summary_row"] = {"row": r_idx, "bg": summary_bg}
                 if not colors_match(summary_bg, cell_bg):
                     plan["audit_issues"].append(
-                        f"Tabla #{table_index}: fila de resumen carece de color {summary_bg}"
+                        f"Table #{table_index}: summary row lacks color {summary_bg}"
                     )
                 self._collect_cell_runs(cells, table_plan, font_primary, "#000000", True)
             else:
@@ -508,7 +543,7 @@ class StyleSyncEngine:
                 table_plan["zebra_rows"].append({"row": r_idx, "bg": bg})
                 if not colors_match(bg, cell_bg):
                     plan["audit_issues"].append(
-                        f"Tabla #{table_index} (fila {r_idx}): fondo no coincide con cebreado ({bg})"
+                        f"Table #{table_index} (row {r_idx}): background does not match striping ({bg})"
                     )
 
         plan["table_updates"].append(table_plan)
@@ -541,10 +576,10 @@ class StyleSyncEngine:
 
 
 def distribute_widths(existing: list, num_cols: int, printable_w: float) -> list:
-    """Anchos objetivo que suman exactamente `printable_w`.
+    """Return target widths that total exactly ``printable_w``.
 
-    Si ya hay anchos asimétricos, se escalan proporcionalmente; si no, se
-    reparten en partes iguales. El redondeo se absorbe en la última columna.
+    Scale existing asymmetric widths proportionally. Otherwise, use equal
+    widths. The last column absorbs rounding.
     """
     if num_cols <= 0:
         return []
@@ -564,7 +599,7 @@ def distribute_widths(existing: list, num_cols: int, printable_w: float) -> list
 
 def widths_conform(col_props: list, num_cols: int, sum_existing: float,
                    printable_w: float) -> bool:
-    """True si las columnas ya están fijadas y suman el ancho útil."""
+    """Return whether columns are fixed and total the printable width."""
     if not col_props or len(col_props) != num_cols:
         return False
     if any(cp.get("widthType") != "FIXED_WIDTH" for cp in col_props):

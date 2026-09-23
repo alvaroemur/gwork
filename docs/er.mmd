@@ -1,144 +1,142 @@
 erDiagram
-    CLIENTE        ||--||  MANIFIESTO          : "declara"
-    CLIENTE        ||--o|  ESTADO              : "acumula en"
-    CLIENTE        ||--o|  DECISIONES          : "tiene pendientes en"
-    CLIENTE        ||--o{  PREVIEW_ARTEFACTO   : "genera"
+    CLIENT ||--|| MANIFEST : "declares"
+    CLIENT ||--o| STATE : "accumulates"
+    CLIENT ||--o| DECISIONS : "has pending"
+    CLIENT ||--o{ PREVIEW_ARTIFACT : "generates"
 
-    MANIFIESTO     ||--o{  ITEM                : "lista"
-    ITEM           ||--o{  TRANSFORM           : "aplica"
-    ITEM           ||--o|  SHEET_CONFIG        : "configura como"
-    ITEM           ||--o|  SHEET_SNAPSHOT      : "tiene snapshot en"
-    ITEM           ||--o|  DOC_SNAPSHOT        : "tiene snapshot en"
-    ITEM           ||--o|  SLIDES_SNAPSHOT     : "tiene snapshot en"
+    MANIFEST ||--o{ ITEM : "lists"
+    ITEM ||--o{ TRANSFORM : "applies"
+    ITEM ||--o| SHEET_CONFIG : "configures"
+    ITEM ||--o| SHEET_SNAPSHOT : "has snapshot"
+    ITEM ||--o| DOC_SNAPSHOT : "has snapshot"
+    ITEM ||--o| SLIDES_SNAPSHOT : "has snapshot"
 
-    SHEET_SNAPSHOT ||--o{  ROW                 : "captura"
-    ROW            ||--|{  CELDA               : "compuesta de"
+    SHEET_SNAPSHOT ||--o{ ROW : "captures"
+    ROW ||--|{ CELL : "contains"
 
-    DECISIONES     ||--o{  PENDIENTE_CELDA     : "lista"
-    DECISIONES     ||--o{  DRIFT_ESTRUCTURAL   : "lista"
-    PENDIENTE_CELDA }o--|| ITEM                : "refiere a"
-    DRIFT_ESTRUCTURAL }o--|| ITEM              : "refiere a"
+    DECISIONS ||--o{ PENDING_CELL : "lists"
+    DECISIONS ||--o{ STRUCTURAL_DRIFT : "lists"
+    PENDING_CELL }o--|| ITEM : "references"
+    STRUCTURAL_DRIFT }o--|| ITEM : "references"
 
-    PREVIEW_ARTEFACTO }o--|| ITEM              : "deriva de"
+    PREVIEW_ARTIFACT }o--|| ITEM : "derives from"
+    DESIGN_SYSTEM ||--|{ STYLE_RULE : "defines"
+    STYLE_RULE }o--|| ITEM : "applies to item type"
+    APPS_SCRIPT_TEMPLATE }o--|| ITEM : "binds to item type"
 
-    DESIGN_SYSTEM  ||--|{  STYLE_RULE          : "define"
-    STYLE_RULE     }o--||  ITEM                : "aplica a tipo de"
-
-    APPS_SCRIPT_TEMPLATE }o--|| ITEM           : "se bindea a tipo de"
-
-    CLIENTE {
+    CLIENT {
         string slug PK
-        string ruta_local
+        string local_path
     }
-    MANIFIESTO {
-        string cliente_slug PK,FK
+    MANIFEST {
+        string client_slug PK,FK
         string drive_folder_id
     }
     ITEM {
         string id PK
-        string cliente_slug FK
+        string client_slug FK
         string local_path UK
         string drive_id
-        enum   tipo "sheet - doc - slides"
-        list   transforms
+        enum type "sheet - doc - slides"
+        list transforms
     }
     SHEET_CONFIG {
         string item_id PK,FK
-        string sheet_tab "nullable - default primera pestana"
-        int    headers_row "default 1"
-        int    data_start_row "default 2"
-        int    data_end_row "nullable"
+        string sheet_tab "nullable - first tab by default"
+        int headers_row "default 1"
+        int data_start_row "default 2"
+        int data_end_row "nullable"
         string key_column "nullable"
-        enum   sync_mode "values_patch - replace"
+        enum sync_mode "values_patch - replace"
     }
     TRANSFORM {
         string id PK
         string item_id FK
-        enum   nombre "strip_internal - rewrite_links"
-        json   config
+        enum name "strip_internal - rewrite_links"
+        json config
     }
-    ESTADO {
-        string cliente_slug PK,FK
+    STATE {
+        string client_slug PK,FK
         datetime last_apply
     }
     SHEET_SNAPSHOT {
         string item_id PK,FK
         datetime applied_at
-        string   remote_modified_time
-        string   local_hash
-        json     headers
-        string   values_hash
+        string remote_modified_time
+        string local_hash
+        json headers
+        string values_hash
     }
     DOC_SNAPSHOT {
         string item_id PK,FK
         datetime applied_at
-        string   remote_modified_time
-        string   local_hash
-        int      word_count "nullable"
+        string remote_modified_time
+        string local_hash
+        int word_count "nullable"
     }
     SLIDES_SNAPSHOT {
         string item_id PK,FK
         datetime applied_at
-        string   remote_modified_time
-        string   local_hash
-        int      slide_count "nullable"
+        string remote_modified_time
+        string local_hash
+        int slide_count "nullable"
     }
     ROW {
         string item_id PK,FK
         string row_key PK
-        int    row_index
+        int row_index
     }
-    CELDA {
+    CELL {
         string item_id PK,FK
         string row_key PK,FK
-        string columna PK
-        string valor
+        string column PK
+        string value
     }
-    DECISIONES {
-        string cliente_slug PK,FK
+    DECISIONS {
+        string client_slug PK,FK
         datetime generated_at
     }
-    PENDIENTE_CELDA {
+    PENDING_CELL {
         string id PK
         string item_id FK
         string row_key
-        string columna
-        string valor_snapshot
-        string valor_local
-        string valor_remoto
-        string nota "nullable"
-        json   comentarios
-        enum   decision "pending - remote - local - skip"
+        string column
+        string snapshot_value
+        string local_value
+        string remote_value
+        string note "nullable"
+        json comments
+        enum decision "pending - remote - local - skip"
     }
-    DRIFT_ESTRUCTURAL {
+    STRUCTURAL_DRIFT {
         string id PK
         string item_id FK
-        string descripcion
-        enum   decision "pending - skip - abort_item"
+        string description
+        enum decision "pending - skip - abort_item"
     }
-    PREVIEW_ARTEFACTO {
+    PREVIEW_ARTIFACT {
         string id PK
         string item_id FK
-        enum   tipo "md_transformado - values_json - pulled_csv - docx_intermedio - pptx_intermedio"
+        enum type "transformed_md - values_json - pulled_csv - intermediate_docx - intermediate_pptx"
         string path
     }
     DESIGN_SYSTEM {
         string id PK
-        string nombre
+        string name
         string version
-        string path "ruta a claude-design.yaml"
+        string path "path to .gwork.yaml"
     }
     STYLE_RULE {
         string id PK
         string design_system_id FK
-        enum   target_tipo "sheet - doc - slides"
-        enum   elemento "heading1 - heading2 - tabla - celda_header - body - paleta"
-        json   estilos "font - size - color - bold - background"
+        enum target_type "sheet - doc - slides"
+        enum element "heading1 - heading2 - table - header_cell - body - palette"
+        json styles "font - size - color - bold - background"
     }
     APPS_SCRIPT_TEMPLATE {
         string id PK
-        enum   target_tipo "sheet - doc - slides"
-        string nombre_menu
-        json   acciones "lista de funciones del menu contextual"
-        string script_source "ruta al template gs"
+        enum target_type "sheet - doc - slides"
+        string menu_name
+        json actions "context-menu function list"
+        string script_source "path to gs template"
     }

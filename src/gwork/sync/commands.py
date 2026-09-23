@@ -26,7 +26,7 @@ console = Console()
 
 
 def _doc_remote_drift(remote_mt: str, snapshot: DocSnapshot) -> tuple[bool, str]:
-    """True si Drive cambió respecto al snapshot y (si hay) después del último apply."""
+    """Return whether Drive changed after the snapshot and last apply, if any."""
     if not remote_mt:
         return False, ""
     newer_than_snapshot = (
@@ -38,14 +38,14 @@ def _doc_remote_drift(remote_mt: str, snapshot: DocSnapshot) -> tuple[bool, str]
     if snapshot.applied_at and remote_mt <= snapshot.applied_at:
         return False, ""
     if snapshot.remote_modified_time:
-        reason = f"Doc remoto editado: {snapshot.remote_modified_time} → {remote_mt}"
+        reason = f"Remote doc edited: {snapshot.remote_modified_time} → {remote_mt}"
     elif snapshot.applied_at:
         reason = (
-            f"Doc remoto modificado ({remote_mt}) después del último apply "
+            f"Remote doc modified ({remote_mt}) after the last apply "
             f"({snapshot.applied_at})"
         )
     else:
-        reason = f"Doc remoto modificado ({remote_mt}); sin snapshot previo"
+        reason = f"Remote doc modified ({remote_mt}); no previous snapshot"
     return True, reason
 
 
@@ -54,25 +54,26 @@ def _doc_remote_drift(remote_mt: str, snapshot: DocSnapshot) -> tuple[bool, str]
 # =====================================================================
 
 def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = None) -> int:
-    """Establece el snapshot inicial para todos los items sin snapshot previo.
+    """Set the initial snapshot for all items without one.
 
-    source='remote' — toma el estado actual de Drive como verdad.
-    source='local'  — toma los CSVs locales como verdad (no toca Drive).
+    source='remote' uses the current Drive state as truth.
+    source='local' uses local CSVs as truth without changing Drive.
     """
     manifest = load_manifest(root)
+    account = manifest.account_for_gog(account)
     state = State(manifest.state_path)
 
-    console.print(f"[bold]bootstrap · {manifest.client}[/bold] — fuente: [cyan]{source}[/cyan]")
+    console.print(f"[bold]bootstrap · {manifest.client}[/bold] — source: [cyan]{source}[/cyan]")
 
     for item in manifest.items:
         local_path = manifest.root / item.local
         if not local_path.exists():
-            console.print(f"[red]skip {item.local} (no existe localmente)[/red]"); continue
+            console.print(f"[red]skip {item.local} (missing locally)[/red]"); continue
 
         if item.type == "sheet":
             existing = state.get_sheet(item.local)
             if existing.headers:
-                console.print(f"[dim]skip {item.local} (ya tiene snapshot)[/dim]"); continue
+                console.print(f"[dim]skip {item.local} (snapshot exists)[/dim]"); continue
 
             if source == "remote":
                 remote = sh.fetch_remote_sheet(item, account)
@@ -99,7 +100,7 @@ def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = N
         elif item.type == "doc":
             existing = state.get_doc(item.local)
             if existing.local_hash:
-                console.print(f"[dim]skip {item.local} (ya tiene snapshot)[/dim]"); continue
+                console.print(f"[dim]skip {item.local} (snapshot exists)[/dim]"); continue
             remote_mt = fetch_doc_modified_time(item.drive_id, account)
             state.set_doc(item.local, DocSnapshot(
                 remote_modified_time=remote_mt,
@@ -109,12 +110,13 @@ def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = N
             console.print(f"[green]✓[/green] {item.local}")
 
     state.save()
-    console.print(f"\n[bold green]bootstrap completado[/bold green] — corre `cowork sync plan` ahora.")
+    console.print("\n[bold green]bootstrap complete[/bold green] — run `gwork sync plan` next.")
     return 0
 
 
 def cmd_plan(root: Path, account: Optional[str] = None) -> int:
     manifest = load_manifest(root)
+    account = manifest.account_for_gog(account)
     state = State(manifest.state_path)
     manifest.preview_dir.mkdir(parents=True, exist_ok=True)
 
@@ -126,7 +128,7 @@ def cmd_plan(root: Path, account: Optional[str] = None) -> int:
     }
 
     table = Table(title=f"plan · {manifest.client}", show_lines=False)
-    table.add_column("item"); table.add_column("tipo"); table.add_column("estado")
+    table.add_column("item"); table.add_column("type"); table.add_column("status")
 
     for item in manifest.items:
         local_path = manifest.root / item.local
@@ -148,37 +150,37 @@ def cmd_plan(root: Path, account: Optional[str] = None) -> int:
     pending = has_pending(decisions)
     protected = [it for it in decisions["items"] if it.get("status") == "protected"]
     if pending:
-        console.print(f"[yellow]{len(pending)} pendientes sin resolver.[/yellow]")
+        console.print(f"[yellow]{len(pending)} unresolved item(s).[/yellow]")
     elif protected:
         console.print(
-            f"[yellow]{len(protected)} doc(s) protegido(s): apply los saltea "
-            f"(usa --force-content-push tras confirmación).[/yellow]"
+            f"[yellow]{len(protected)} protected doc(s): apply skips them "
+            f"(use --force-content-push after confirmation).[/yellow]"
         )
     else:
-        console.print("[green]Todo listo para apply.[/green]")
+        console.print("[green]Ready to apply.[/green]")
     return 0
 
 
 def _status_label(entry: dict) -> str:
     s = entry.get("status", "?")
-    if s == "noop":           return "[dim]sin cambios[/dim]"
+    if s == "noop":           return "[dim]no changes[/dim]"
     if s == "struct_drift":   return f"[red]struct drift:[/red] {entry.get('struct_drift','')}"
     if s == "doc_drift":      return f"[red]doc drift:[/red] {entry.get('drift_reason','')}"
-    if s == "protected":      return f"[yellow]protegido[/yellow] — {entry.get('protect_reason','')}"
-    if s == "missing_local":  return "[red]archivo local no existe[/red]"
+    if s == "protected":      return f"[yellow]protected[/yellow] — {entry.get('protect_reason','')}"
+    if s == "missing_local":  return "[red]local file missing[/red]"
     if s == "unsupported_ast":
-        return f"[red]sin traducción a AST:[/red] {entry.get('unsupported_reason','')}"
+        return f"[red]no AST translation:[/red] {entry.get('unsupported_reason','')}"
     if s == "ok":
         bits = []
         auto = entry.get("auto_merge", [])
         pend = entry.get("pending", [])
         ts   = entry.get("transforms_summary")
         if auto: bits.append(f"{len(auto)} auto")
-        if pend: bits.append(f"[yellow]{len(pend)} pendientes[/yellow]")
+        if pend: bits.append(f"[yellow]{len(pend)} pending[/yellow]")
         if ts:   bits.append(f"strip={ts['strip']} rewrite={ts['rewrite']}")
         ast = entry.get("ast_summary")
-        if ast: bits.append(f"ast={ast['blocks']} bloques/{ast['tables']} tablas")
-        return " · ".join(bits) if bits else "[green]listo[/green]"
+        if ast: bits.append(f"ast={ast['blocks']} blocks/{ast['tables']} tables")
+        return " · ".join(bits) if bits else "[green]ready[/green]"
     return s
 
 
@@ -276,8 +278,8 @@ def _plan_doc(manifest: Manifest, item: Item, state: State,
     }
 
     if content_mode == "ast":
-        # Falla en el plan, no en el apply: si el Markdown tiene un nodo sin
-        # traducción, conviene saberlo antes de tocar el documento.
+        # Fail during planning, not apply, so unsupported Markdown nodes are
+        # reported before the document changes.
         try:
             blocks = markdown_to_blocks(result.text)
         except UnsupportedNode as exc:
@@ -296,9 +298,9 @@ def _plan_doc(manifest: Manifest, item: Item, state: State,
     if item.protect_styling:
         plan_entry["status"] = "protected"
         plan_entry["protect_reason"] = (
-            "protect_styling con content_mode: docx_upload — el apply reemplaza "
-            "el archivo entero y destruye estilo nativo, pestañas y márgenes. "
-            "Usa content_mode: ast, o --force-content-push tras confirmación."
+            "protect_styling with content_mode: docx_upload — apply replaces "
+            "the entire file and destroys native styles, tabs, and margins. "
+            "Use content_mode: ast, or --force-content-push after confirmation."
         )
     return plan_entry
 
@@ -310,30 +312,30 @@ def _plan_doc(manifest: Manifest, item: Item, state: State,
 def cmd_apply(root: Path, only=None, account: Optional[str] = None,
               force_content_push: bool = False) -> int:
     manifest = load_manifest(root)
+    account = manifest.account_for_gog(account)
     state = State(manifest.state_path)
 
     if not manifest.decisions_path.exists():
-        console.print("[red]No hay decisions.yaml — corre `cowork sync plan` primero.[/red]")
+        console.print("[red]decisions.yaml is missing — run `gwork sync plan` first.[/red]")
         return 1
 
     decisions = read_decisions(manifest.decisions_path)
     account = account or decisions.get("account")
     if force_content_push:
         console.print(
-            "[yellow]--force-content-push está en retirada:[/yellow] solo tiene "
-            "efecto con content_mode: docx_upload. Con content_mode: ast (el "
-            "defecto) el apply ya no destruye el estilo nativo y la bandera se "
-            "ignora."
+            "[yellow]--force-content-push is deprecated:[/yellow] it only affects "
+            "content_mode: docx_upload. With content_mode: ast (the default), "
+            "apply preserves native styles and ignores this flag."
         )
     pending = has_pending(decisions)
     if pending:
-        console.print(f"[red]{len(pending)} decisiones pending — resuelve decisions.yaml:[/red]")
+        console.print(f"[red]{len(pending)} pending decisions — resolve decisions.yaml:[/red]")
         for p in pending[:10]:
             console.print(f"  · {p}")
         return 1
 
     only_set = set(only or [])
-    # Obtener access token una vez (para Docs)
+    # Fetch the access token once for Docs.
     _access_token: Optional[str] = None
 
     for entry in decisions["items"]:
@@ -348,7 +350,7 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None,
 
         item = manifest.find_item(entry["local"])
         if item is None:
-            console.print(f"[red]Item {entry['local']} no está en el manifiesto[/red]"); continue
+            console.print(f"[red]Item {entry['local']} is not in the manifest[/red]"); continue
 
         if item.type == "sheet":
             if status != "ok":
@@ -360,23 +362,23 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None,
                 if entry.get("drift_decision") != "force_push":
                     console.print(
                         f"[yellow]skip {entry['local']} (doc_drift — "
-                        f"pon drift_decision: force_push en decisions.yaml)[/yellow]"
+                        f"set drift_decision: force_push in decisions.yaml)[/yellow]"
                     )
                     continue
             elif status == "protected":
                 if not force_content_push:
                     console.print(
-                        f"[yellow]skip {entry['local']} (protect_styling con "
-                        f"docx_upload — pasa a content_mode: ast, o usa "
-                        f"--force-content-push tras confirmación explícita)[/yellow]"
+                        f"[yellow]skip {entry['local']} (protect_styling with "
+                        f"docx_upload — switch to content_mode: ast, or use "
+                        f"--force-content-push after explicit confirmation)[/yellow]"
                     )
                     continue
             content_mode = manifest.effective_content_mode(item)
             if (content_mode == "docx_upload" and item.protect_styling
                     and not force_content_push):
                 console.print(
-                    f"[yellow]skip {entry['local']} (protect_styling con "
-                    f"docx_upload — pasa a content_mode: ast)[/yellow]"
+                    f"[yellow]skip {entry['local']} (protect_styling with "
+                    f"docx_upload — switch to content_mode: ast)[/yellow]"
                 )
                 continue
             if content_mode == "docx_upload" and _access_token is None and account:
@@ -384,23 +386,23 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None,
                 try:
                     _access_token = get_access_token(account)
                 except Exception as e:
-                    console.print(f"[red]No se pudo obtener access token: {e}[/red]"); return 1
+                    console.print(f"[red]Could not fetch access token: {e}[/red]"); return 1
             if not _apply_doc(manifest, item, entry, state, account, _access_token,
                               force_content_push=force_content_push):
                 continue
         console.print(f"[green]✓[/green] {item.local}")
 
     state.save()
-    console.print(f"\n[bold green]apply completado[/bold green] — state actualizado.")
+    console.print("\n[bold green]apply complete[/bold green] — state updated.")
     return 0
 
 
 def _apply_sheet(item: Item, entry: dict, state: State,
                  account: Optional[str], manifest_root: Optional[Path] = None) -> None:
-    # Re-fetch remoto para validar carrera
+    # Re-fetch remote state to detect races.
     remote = sh.fetch_remote_sheet(item, account)
     if entry.get("remote_modified_time") and remote.modified_time != entry["remote_modified_time"]:
-        console.print(f"[yellow]Race en {item.local}: remoto cambió desde plan. Skip.[/yellow]")
+        console.print(f"[yellow]Race in {item.local}: remote changed after plan. Skip.[/yellow]")
         return
 
     csv_abs = (manifest_root / item.local) if manifest_root else Path(item.local)
@@ -432,16 +434,16 @@ def _apply_sheet(item: Item, entry: dict, state: State,
                               local_matrix.rows, account)
 
     if pullback:
-        # Aplicar write-back al CSV local
-        # local_matrix puede estar desactualizado; usar root del manifiesto
+        # Write changes back to the local CSV.
+        # local_matrix may be stale; use the manifest root.
         for rk, col, val in pullback:
             if rk in local_matrix.rows:
                 local_matrix.rows[rk][col] = val
-        # Necesitamos la ruta absoluta; la recuperamos del manifest a través del entry
+        # Use the absolute path resolved from the manifest.
         if csv_abs.exists():
             sh.write_csv_matrix(csv_abs, local_matrix)
 
-    # Snapshot final
+    # Final snapshot.
     final = sh.fetch_remote_sheet(item, account)
     state.set_sheet(item.local, SheetSnapshot(
         headers=final.matrix.headers,
@@ -464,7 +466,7 @@ def _apply_doc(manifest: Manifest, item: Item, entry: dict, state: State,
     plan_mt = entry.get("remote_modified_time")
     if plan_mt and remote_mt and remote_mt != plan_mt:
         console.print(
-            f"[yellow]Race en {item.local}: remoto cambió desde plan "
+            f"[yellow]Race in {item.local}: remote changed after plan "
             f"({plan_mt} → {remote_mt}). Skip.[/yellow]"
         )
         return False
@@ -472,8 +474,8 @@ def _apply_doc(manifest: Manifest, item: Item, entry: dict, state: State,
     if (content_mode == "docx_upload" and item.protect_styling
             and not force_content_push):
         console.print(
-            f"[yellow]skip {item.local}: protect_styling con docx_upload "
-            f"(pasa a content_mode: ast, o --force-content-push)[/yellow]"
+            f"[yellow]skip {item.local}: protect_styling with docx_upload "
+            f"(switch to content_mode: ast, or use --force-content-push)[/yellow]"
         )
         return False
     preview_path = manifest.root / entry["preview_path"] if entry.get("preview_path") else None
