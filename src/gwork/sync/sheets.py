@@ -72,6 +72,14 @@ def _resolve_tab(item: Item, meta: dict) -> tuple[str, int]:
     """Return ``(tab_title, sheet_id)`` for the configured item."""
     # The Sheets API omits sheetId when it is 0 for the first tab.
     tabs = meta.get("sheets", [])
+    if item.resource_id is not None:
+        for tab in tabs:
+            props = tab["properties"]
+            if str(props.get("sheetId", 0)) == str(item.resource_id):
+                return props["title"], props.get("sheetId", 0)
+        raise ValueError(
+            f"Worksheet ID '{item.resource_id}' was not found in spreadsheet {item.drive_id}"
+        )
     if item.sheet_tab:
         for t in tabs:
             props = t["properties"]

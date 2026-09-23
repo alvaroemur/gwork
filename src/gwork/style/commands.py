@@ -145,12 +145,13 @@ def cmd_manifest_init(manifest_path: Path, doc_id: str,
         path = path / MANIFEST_NAME
     data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
     data = data or {}
-    data.setdefault("version", 1)
+    data.setdefault("version", 2)
     transport = data.setdefault("transport", {})
     transport.setdefault("provider", "gog")
     if account:
         transport["account"] = account
-    data.setdefault("items", [])
+    if "items" not in data:
+        data.setdefault("files", [])
     style = data.setdefault("style", {})
     style["document_id"] = doc_id
     style.setdefault("template_tab", "_template")

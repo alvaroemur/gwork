@@ -53,7 +53,8 @@ def _doc_remote_drift(remote_mt: str, snapshot: DocSnapshot) -> tuple[bool, str]
 #  PLAN
 # =====================================================================
 
-def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = None) -> int:
+def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = None,
+                  only: Optional[list[str]] = None) -> int:
     """Set the initial snapshot for all items without one.
 
     source='remote' uses the current Drive state as truth.
@@ -65,7 +66,12 @@ def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = N
 
     console.print(f"[bold]bootstrap · {manifest.client}[/bold] — source: [cyan]{source}[/cyan]")
 
-    for item in manifest.items:
+    try:
+        selected_items = manifest.select_items(only)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 2
+    for item in selected_items:
         local_path = manifest.root / item.local
         if not local_path.exists():
             console.print(f"[red]skip {item.local} (missing locally)[/red]"); continue
@@ -114,7 +120,8 @@ def cmd_bootstrap(root: Path, source: str = "remote", account: Optional[str] = N
     return 0
 
 
-def cmd_plan(root: Path, account: Optional[str] = None) -> int:
+def cmd_plan(root: Path, account: Optional[str] = None,
+             only: Optional[list[str]] = None) -> int:
     manifest = load_manifest(root)
     account = manifest.account_for_gog(account)
     state = State(manifest.state_path)
@@ -130,7 +137,12 @@ def cmd_plan(root: Path, account: Optional[str] = None) -> int:
     table = Table(title=f"plan · {manifest.client}", show_lines=False)
     table.add_column("item"); table.add_column("type"); table.add_column("status")
 
-    for item in manifest.items:
+    try:
+        selected_items = manifest.select_items(only)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 2
+    for item in selected_items:
         local_path = manifest.root / item.local
         if not local_path.exists():
             entry = {"local": item.local, "type": item.type, "status": "missing_local"}
@@ -321,25 +333,46 @@ def cmd_apply(root: Path, only=None, account: Optional[str] = None,
 
     decisions = read_decisions(manifest.decisions_path)
     account = account or decisions.get("account")
+    try:
+        selected_items = manifest.select_items(list(only or []))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 2
+    only_set = {item.local for item in selected_items}
+    planned_locals = {entry["local"] for entry in decisions.get("items", [])}
+    missing_from_plan = only_set - planned_locals
+    if missing_from_plan:
+        missing = ", ".join(sorted(missing_from_plan))
+        console.print(
+            f"[red]The reviewed plan does not include: {missing}. "
+            "Run `gwork sync plan` with the same --only selection.[/red]"
+        )
+        return 2
     if force_content_push:
         console.print(
             "[yellow]--force-content-push is deprecated:[/yellow] it only affects "
             "content_mode: docx_upload. With content_mode: ast (the default), "
             "apply preserves native styles and ignores this flag."
         )
-    pending = has_pending(decisions)
+    selected_decisions = {
+        **decisions,
+        "items": [
+            entry for entry in decisions.get("items", [])
+            if entry["local"] in only_set
+        ],
+    }
+    pending = has_pending(selected_decisions)
     if pending:
         console.print(f"[red]{len(pending)} pending decisions — resolve decisions.yaml:[/red]")
         for p in pending[:10]:
             console.print(f"  · {p}")
         return 1
 
-    only_set = set(only or [])
     # Fetch the access token once for Docs.
     _access_token: Optional[str] = None
 
     for entry in decisions["items"]:
-        if only_set and entry["local"] not in only_set:
+        if entry["local"] not in only_set:
             continue
         status = entry.get("status")
         if status == "noop":
