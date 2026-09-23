@@ -29,10 +29,16 @@ La primera corrida abre el navegador para autorizar; el token se cachea en
 
 ```
 cd ~/Cowork/inspiro/clientes/mifondo
+cowork sync fetch --comments --diff   # solo lectura: drift local/remoto, comentarios
+                                       # abiertos, diff aproximado — no escribe nada
 cowork sync plan        # lee manifiesto, compara local vs Drive, genera preview/
                         # y decisions.yaml con las celdas ambiguas
 # revisar .drivesync/preview/decisions.yaml, resolver pendientes
 cowork sync apply       # ejecuta el plan: batchUpdate de Sheets, upload de Docs
+
+# o el atajo con preflight incorporado:
+cowork sync sync --apply   # fetch (preflight) → plan → apply; aborta si Drive
+                            # divergió del snapshot en vez de pisarlo
 ```
 
 ## Escritura de Docs: `content_mode`
