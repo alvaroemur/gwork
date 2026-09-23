@@ -1,10 +1,10 @@
-"""Tests de assess fetch/sync y normalización de texto."""
+"""Tests for fetch/sync assessment and text normalization."""
 
 from pathlib import Path
 
-from cowork.sync.fetch import assess_doc, md_to_plain_approx, normalize_plain
-from cowork.sync.manifest import Item
-from cowork.sync.state import DocSnapshot, file_hash
+from gwork.sync.fetch import assess_doc, md_to_plain_approx, normalize_plain
+from gwork.sync.manifest import Item
+from gwork.sync.state import DocSnapshot, file_hash
 
 
 def test_assess_doc_noop():
@@ -20,13 +20,13 @@ def test_assess_doc_noop():
 
 def test_assess_doc_local_only(tmp_path: Path):
     md = tmp_path / "doc.md"
-    md.write_text("# Título\n\nContenido.", encoding="utf-8")
+    md.write_text("# Title\n\nContent.", encoding="utf-8")
     local_h = file_hash(md)
     item = Item(local="doc.md", drive_id="abc", type="doc")
     snap = DocSnapshot(
         remote_modified_time="2026-05-27T10:00:00Z",
         applied_at="2026-05-27T10:00:00Z",
-        local_hash="sha256:otro",
+        local_hash="sha256:other",
     )
     entry = assess_doc(item, snap, md, "2026-05-27T10:00:00Z")
     assert entry["sync_status"] == "local_only"
@@ -35,7 +35,7 @@ def test_assess_doc_local_only(tmp_path: Path):
 
 def test_assess_doc_remote_only(tmp_path: Path):
     md = tmp_path / "doc.md"
-    md.write_text("sin cambios", encoding="utf-8")
+    md.write_text("unchanged", encoding="utf-8")
     local_h = file_hash(md)
     item = Item(local="doc.md", drive_id="abc", type="doc")
     snap = DocSnapshot(
@@ -50,22 +50,22 @@ def test_assess_doc_remote_only(tmp_path: Path):
 
 def test_assess_doc_conflict(tmp_path: Path):
     md = tmp_path / "doc.md"
-    md.write_text("cambio local", encoding="utf-8")
+    md.write_text("local change", encoding="utf-8")
     item = Item(local="doc.md", drive_id="abc", type="doc")
     snap = DocSnapshot(
         remote_modified_time="2026-05-27T10:00:00Z",
         applied_at="2026-05-27T10:00:00Z",
-        local_hash="sha256:otro",
+        local_hash="sha256:other",
     )
     entry = assess_doc(item, snap, md, "2026-05-27T12:00:00Z")
     assert entry["sync_status"] == "conflict"
 
 
 def test_md_to_plain_approx_strips_markdown():
-    raw = "# Título\n\n**Negrita** y [link](x.md)\n"
+    raw = "# Title\n\n**Bold** and [link](x.md)\n"
     plain = md_to_plain_approx(raw)
-    assert "Título" in plain
-    assert "Negrita" in plain
+    assert "Title" in plain
+    assert "Bold" in plain
     assert "link" in plain
     assert "**" not in plain
     assert "](" not in plain

@@ -14,7 +14,7 @@ from .state import SheetSnapshot
 
 
 # ---------------------------------------------------------------------------
-# Modelos de matriz
+# Matrix models
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -34,7 +34,7 @@ class RemoteSheet:
 
 
 # ---------------------------------------------------------------------------
-# Lectura local
+# Local reads
 # ---------------------------------------------------------------------------
 
 def read_csv_matrix(path: Path, key_column: Optional[str]) -> Matrix:
@@ -65,28 +65,28 @@ def write_csv_matrix(path: Path, matrix: Matrix) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Lectura remota via gog
+# Remote reads through gog
 # ---------------------------------------------------------------------------
 
 def _resolve_tab(item: Item, meta: dict) -> tuple[str, int]:
-    """Devuelve (tab_title, sheet_id) según la configuración del item."""
-    # La API de Sheets omite `sheetId` cuando vale 0 (primer tab por default).
+    """Return ``(tab_title, sheet_id)`` for the configured item."""
+    # The Sheets API omits sheetId when it is 0 for the first tab.
     tabs = meta.get("sheets", [])
     if item.sheet_tab:
         for t in tabs:
             props = t["properties"]
             if props["title"] == item.sheet_tab:
                 return props["title"], props.get("sheetId", 0)
-        raise ValueError(f"Tab '{item.sheet_tab}' no encontrado en spreadsheet {item.drive_id}")
+        raise ValueError(f"Tab '{item.sheet_tab}' was not found in spreadsheet {item.drive_id}")
     props = tabs[0]["properties"]
     return props["title"], props.get("sheetId", 0)
 
 
 def _rows_to_matrix(raw_values: list[list[str]], raw_formulas: list[list[str]],
                     item: Item, headers: list[str]) -> tuple[Matrix, dict[str, dict[str, str]]]:
-    """Convierte listas de filas (valores y fórmulas) en Matrix y mapa de fórmulas."""
-    ds = item.data_start_row - item.headers_row   # offset relativo a headers_row (raw_values empieza ahí)
-    de = item.data_end_row             # None = hasta el final
+    """Convert value and formula rows into a matrix and formula map."""
+    ds = item.data_start_row - item.headers_row
+    de = item.data_end_row
     width = len(headers)
 
     rows: dict[str, dict[str, str]] = {}
@@ -126,12 +126,12 @@ def fetch_remote_sheet(item: Item, account: Optional[str] = None) -> RemoteSheet
     drive_meta = drive_get(item.drive_id, account)
     modified_time = extract_modified_time(drive_meta)
 
-    # Fetch valores y fórmulas — rango = tab completa
+    # Fetch values and formulas for the complete tab.
     range_ = f"'{tab_title}'"
     raw_values = sheets_get(item.drive_id, range_, render="FORMATTED_VALUE", account=account)
     raw_formulas = sheets_get(item.drive_id, range_, render="FORMULA", account=account)
 
-    # headers_row es 1-indexed, en raw_values es 0-indexed
+    # headers_row is one-based; raw_values is zero-based.
     hr = item.headers_row - 1
     if hr >= len(raw_values):
         return RemoteSheet(
@@ -141,7 +141,7 @@ def fetch_remote_sheet(item: Item, account: Optional[str] = None) -> RemoteSheet
         )
     headers = [str(c) for c in raw_values[hr]]
 
-    # _rows_to_matrix recibe las filas a partir de headers_row (inclusive)
+    # _rows_to_matrix receives rows starting at headers_row, inclusive.
     values_from_header = raw_values[hr:]
     formulas_from_header = raw_formulas[hr:] if raw_formulas else []
     matrix, formulas = _rows_to_matrix(values_from_header, formulas_from_header, item, headers)
@@ -170,7 +170,7 @@ def fetch_threaded_comments(drive_id: str, account: Optional[str] = None) -> lis
 
 
 # ---------------------------------------------------------------------------
-# Diff y clasificación
+# Diff and classification
 # ---------------------------------------------------------------------------
 
 CellClass = str  # "noop" | "push" | "pull_formula" | "pending_remote" | "pending_conflict"
@@ -200,9 +200,9 @@ def _detect_struct_drift(snapshot: SheetSnapshot, local: Matrix, remote: Matrix)
     issues = []
     snap_h = snapshot.headers or []
     if snap_h and snap_h != remote.headers:
-        issues.append(f"headers remotos: {snap_h} → {remote.headers}")
+        issues.append(f"remote headers: {snap_h} → {remote.headers}")
     if local.headers and local.headers != remote.headers:
-        issues.append(f"local≠remoto: {local.headers} vs {remote.headers}")
+        issues.append(f"local != remote: {local.headers} vs {remote.headers}")
     return "; ".join(issues) if issues else None
 
 
@@ -264,7 +264,7 @@ def diff_sheet(snapshot: SheetSnapshot, local: Matrix, remote: RemoteSheet) -> S
 
 
 # ---------------------------------------------------------------------------
-# A1 notation y update via gog
+# A1 notation and updates through gog
 # ---------------------------------------------------------------------------
 
 def col_a1(idx: int) -> str:
@@ -283,17 +283,15 @@ def apply_cell_updates(drive_id: str, tab_title: str, headers: list[str],
                        updates: list[tuple[str, str, str]],
                        local_rows: dict[str, dict[str, str]],
                        account: Optional[str] = None) -> None:
-    """Aplica lista de (row_key, column, value) al Sheet via gog sheets update.
+    """Apply ``(row_key, column, value)`` entries through ``gog sheets update``.
 
-    Escribe una sola request por fila: agrupa las celdas cambiadas de la fila en
-    el rango contiguo [col_mín, col_máx] y rellena las celdas intermedias no
-    cambiadas con su valor local (que ya coincide con el remoto, así que no las
-    altera). Esto evita reventar la cuota de write requests/min de Sheets cuando
-    una fila tiene muchas celdas modificadas.
+    Send one request per row. Changed cells use one contiguous range, while
+    unchanged cells in that range retain their matching local value. This
+    avoids exhausting the Sheets write quota on wide rows.
     """
     if not updates:
         return
-    # Agrupar por fila para hacer una sola llamada por fila
+    # Group updates so each row requires one API call.
     by_row: dict[str, dict[str, str]] = {}
     for rk, col, val in updates:
         by_row.setdefault(rk, {})[col] = val

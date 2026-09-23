@@ -1,8 +1,8 @@
-"""Tests de extracción de modifiedTime y detección de doc drift."""
+"""Tests for modifiedTime extraction and Doc drift detection."""
 
-from cowork.sync.commands import _doc_remote_drift
-from cowork.sync.gog import extract_modified_time
-from cowork.sync.state import DocSnapshot
+from gwork.sync.commands import _doc_remote_drift
+from gwork.sync.gog import extract_modified_time
+from gwork.sync.state import DocSnapshot
 
 
 def test_extract_modified_time_top_level():
@@ -27,7 +27,7 @@ def test_doc_drift_when_snapshot_remote_mt_empty():
     )
     drift, reason = _doc_remote_drift("2026-05-27T18:00:00Z", snap)
     assert drift is True
-    assert "después del último apply" in reason
+    assert "after the last apply" in reason
 
 
 def test_doc_drift_no_drift_if_remote_before_apply():

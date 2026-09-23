@@ -4,5 +4,5 @@ __pycache__/
 .venv/
 dist/
 build/
-.drivesync/preview/
-.drivesync.state.json.lock
+.gwork/preview/
+.gwork.state.json.lock

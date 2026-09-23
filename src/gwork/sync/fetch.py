@@ -21,7 +21,7 @@ console = Console()
 
 
 def md_to_plain_approx(md: str) -> str:
-    """Aproximación legible del markdown para diff contra texto plano del Doc."""
+    """Return readable Markdown for comparison with plain Doc text."""
     text = md
     text = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
@@ -83,8 +83,8 @@ def assess_doc(
         entry["drift_reason"] = drift_reason
     if item.protect_styling and sync_status in ("local_only", "conflict"):
         entry["protect_styling_note"] = (
-            "apply vía Pandoc destruye estilo nativo; usar parches quirúrgicos o "
-            "--force-content-push tras confirmación."
+            "Applying through Pandoc destroys native styles; use targeted patches "
+            "or --force-content-push after confirmation."
         )
     return entry
 
@@ -174,6 +174,7 @@ def cmd_fetch(
     as_json: bool = False,
 ) -> int:
     manifest = load_manifest(root)
+    account = manifest.account_for_gog(account)
     state = State(manifest.state_path)
     only_set = set(only or [])
     results = []
@@ -214,9 +215,9 @@ def cmd_fetch(
 
     table = Table(title=f"fetch · {manifest.client}", show_lines=False)
     table.add_column("item")
-    table.add_column("tipo")
-    table.add_column("estado")
-    table.add_column("remoto")
+    table.add_column("type")
+    table.add_column("status")
+    table.add_column("remote")
     for entry in results:
         status = entry.get("sync_status", entry.get("status", "?"))
         color = {
@@ -250,20 +251,20 @@ def cmd_fetch(
                         + (f"\n  ↳ «{c['quoted']}»" if c.get("quoted") else "")
                         for c in open_comments[:8]
                     ),
-                    title=f"Comentarios abiertos · {entry['local']}",
+                    title=f"Open comments · {entry['local']}",
                 ))
 
         if diff and entry.get("diff"):
             snippet = entry["diff"]
             if len(snippet) > 4000:
-                snippet = snippet[:4000] + "\n… (diff truncado)\n"
+                snippet = snippet[:4000] + "\n… (diff truncated)\n"
             console.print(Panel(snippet, title=f"diff · {entry['local']}", border_style="cyan"))
 
     blockers = [e for e in results if e.get("sync_status") in ("remote_only", "conflict")]
     if blockers:
         console.print(
-            f"\n[yellow]{len(blockers)} item(s) con cambios solo en Drive o conflicto — "
-            f"revisá antes de sync.[/yellow]"
+            f"\n[yellow]{len(blockers)} item(s) with Drive-only changes or conflicts — "
+            f"review before syncing.[/yellow]"
         )
     return 0
 
@@ -277,8 +278,9 @@ def cmd_sync(
     comments: bool = False,
     diff: bool = False,
 ) -> int:
-    """Preflight fetch → plan → (opcional) apply. No escribe si hay drift remoto."""
+    """Run fetch → plan → optional apply. Do not write when remote drift exists."""
     manifest = load_manifest(root)
+    account = manifest.account_for_gog(account)
     state = State(manifest.state_path)
     only_set = set(only or [])
 
@@ -297,9 +299,9 @@ def cmd_sync(
 
     if blockers:
         console.print(
-            "\n[red]Sync abortado:[/red] hay cambios en Drive que no vienen del markdown local. "
-            "Corré `cowork sync fetch --comments --diff` y resolvé en la UI o alineá el local "
-            "antes de empujar."
+            "\n[red]Sync aborted:[/red] Drive has changes absent from local Markdown. "
+            "Run `gwork sync fetch --comments --diff`, then resolve them in the UI "
+            "or align the local file before pushing."
         )
         return 2
 
@@ -314,8 +316,8 @@ def cmd_sync(
 
     if not apply:
         console.print(
-            "\n[dim]Preflight OK. Para empujar: `cowork sync sync --apply` "
-            "(+ `--force-content-push` si hay docs con protect_styling).[/dim]"
+            "\n[dim]Preflight OK. To push, run `gwork sync sync --apply` "
+            "(add `--force-content-push` for docs with protect_styling).[/dim]"
         )
         return 0
 

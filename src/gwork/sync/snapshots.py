@@ -6,9 +6,9 @@ from typing import Optional
 
 
 def snapshot_dir(manifest_root: Path, local: str) -> Path:
-    """Directorio de historial para un item local (path sanitizado)."""
+    """Return the snapshot directory for a local item using a sanitized path."""
     sanitized = local.replace("/", "__")
-    return manifest_root / ".drivesync" / "snapshots" / sanitized
+    return manifest_root / ".gwork" / "snapshots" / sanitized
 
 
 def save_doc_apply_snapshot(
@@ -22,7 +22,7 @@ def save_doc_apply_snapshot(
     account: Optional[str],
     applied_at: str,
 ) -> Path:
-    """Guarda markdown aplicado + sidecar JSON tras un apply exitoso."""
+    """Save applied Markdown and JSON metadata after a successful apply."""
     out_dir = snapshot_dir(manifest_root, local)
     out_dir.mkdir(parents=True, exist_ok=True)
     md_path = out_dir / f"{applied_at}.md"

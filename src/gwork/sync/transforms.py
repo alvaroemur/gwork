@@ -19,22 +19,22 @@ class TransformResult:
             self.unresolved_links = []
 
 
-# Bloques internos: <!-- internal --> ... <!-- /internal -->
+# Internal blocks: <!-- internal --> ... <!-- /internal -->
 INTERNAL_RE = re.compile(
     r"[ \t]*<!--\s*internal\s*-->.*?<!--\s*/internal\s*-->[ \t]*\n?",
     re.DOTALL | re.IGNORECASE,
 )
 
-# Links markdown: [texto](path)
+# Markdown links: [text](path)
 MD_LINK_RE = re.compile(r"(\[[^\]]+\])\(([^)]+)\)")
 
 
 def strip_internal(text: str) -> tuple[str, int]:
     matches = INTERNAL_RE.findall(text)
     if not matches:
-        # Validar que no haya open sin close
+        # Reject an opening marker without a closing marker.
         if re.search(r"<!--\s*internal\s*-->", text, re.IGNORECASE):
-            raise ValueError("Marcador <!-- internal --> sin cierre </!-- /internal -->")
+            raise ValueError("Opening <!-- internal --> marker has no closing marker")
         return text, 0
     cleaned = INTERNAL_RE.sub("", text)
     return cleaned, len(matches)
@@ -51,10 +51,10 @@ def _drive_url(item) -> str:
 
 
 def rewrite_links(text: str, manifest: Manifest, md_path: Path) -> tuple[str, int, list[str]]:
-    """Reemplaza links relativos a .csv/.md por URLs de Drive según el manifiesto.
+    """Replace relative CSV and Markdown links with manifest Drive URLs.
 
-    md_path es la ruta absoluta del MD que se está transformando; los links se
-    resuelven relativos al directorio que lo contiene.
+    ``md_path`` is the absolute path of the file being transformed. Relative
+    links resolve from its parent directory.
     """
     rewrites = 0
     unresolved: list[str] = []
@@ -96,7 +96,7 @@ def apply_md_transforms(md_path: Path, manifest: Manifest, transform_names: list
             rewrite_count += n
             unresolved.extend(u)
         else:
-            raise ValueError(f"Transform desconocido: {name}")
+            raise ValueError(f"Unknown transform: {name}")
     return TransformResult(
         text=text,
         strip_count=strip_count,
@@ -106,7 +106,7 @@ def apply_md_transforms(md_path: Path, manifest: Manifest, transform_names: list
 
 
 def doc_transform_names(manifest: Manifest, item: Item) -> list[str]:
-    """Nombres de transform a aplicar antes de subir un Doc."""
+    """Return transforms to apply before uploading a Google Doc."""
     names = [t.name for t in item.transforms]
     if manifest.effective_link_mode(item) == "rewrite_to_drive":
         if "rewrite_links" not in names:

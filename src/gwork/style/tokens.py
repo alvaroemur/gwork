@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-"""Conversión entre tokens del manifiesto y tipos de la Docs API."""
+"""Convert between manifest tokens and Docs API types."""
 
 import re
 from typing import Any, Optional
 
 
 def hex_to_rgb(hex_str: str) -> dict:
-    """#RRGGBB o #RGB → RgbColor de la Docs API (componentes 0.0–1.0)."""
+    """Convert #RRGGBB or #RGB to a Docs API RgbColor with 0.0–1.0 components."""
     clean = str(hex_str).strip().lstrip("#")
     if len(clean) == 3:
         clean = "".join(c * 2 for c in clean)
@@ -21,7 +21,7 @@ def hex_to_rgb(hex_str: str) -> dict:
 
 
 def rgb_to_hex(rgb: Optional[dict]) -> str:
-    """RgbColor de la Docs API → #RRGGBB."""
+    """Convert a Docs API RgbColor to #RRGGBB."""
     if not rgb:
         return "#000000"
     r = int(round(rgb.get("red", 0.0) * 255))
@@ -31,7 +31,7 @@ def rgb_to_hex(rgb: Optional[dict]) -> str:
 
 
 def parse_pt(value: Any) -> float:
-    """Extrae puntos de un número o una cadena tipo '35pt'."""
+    """Extract points from a number or a string such as ``35pt``."""
     if value is None:
         return 0.0
     if isinstance(value, (int, float)):
@@ -43,7 +43,7 @@ def parse_pt(value: Any) -> float:
 
 
 def parse_border(border_val: Any) -> tuple:
-    """'1.25pt solid #E6007E' → (ancho_pt, dashStyle, color_hex)."""
+    """Convert a border string to ``(width_pt, dashStyle, color_hex)``."""
     if not border_val:
         return 1.0, "SOLID", "#000000"
     val = str(border_val).strip()
@@ -68,7 +68,7 @@ def parse_border(border_val: Any) -> tuple:
 
 
 def colors_match(hex_a: str, rgb_b: Optional[dict], tol: float = 0.05) -> bool:
-    """Compara un hex del manifiesto contra un RgbColor vivo, con tolerancia."""
+    """Compare a manifest hex value with a live RgbColor within a tolerance."""
     if not rgb_b:
         return False
     a = hex_to_rgb(hex_a)
@@ -80,7 +80,7 @@ def colors_match(hex_a: str, rgb_b: Optional[dict], tol: float = 0.05) -> bool:
 
 
 def is_bold_weight(weight: Any, threshold: int = 700) -> bool:
-    """La Docs API solo tiene bold binario; los pesos >= 700 se mapean a bold."""
+    """Map weights at or above the threshold to the Docs API binary bold."""
     try:
         return int(weight) >= threshold
     except (TypeError, ValueError):

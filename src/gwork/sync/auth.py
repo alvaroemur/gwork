@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Obtiene un access token de corta duración usando las credenciales de gog-cli.
+"""Get a short-lived access token from gog-cli credentials.
 
-gog gestiona el OAuth2 completo. Para las llamadas REST que gog no cubre
-(ej. Docs API batchUpdate para reemplazar contenido), necesitamos un access
-token. Lo construimos con:
+gog manages the full OAuth2 flow. REST calls outside gog's API coverage,
+such as Docs API batchUpdate for content replacement, require an access token.
+Build it from:
   - client_id / client_secret: ~/Library/Application Support/gogcli/credentials.json
-  - refresh_token: exportado temporalmente con `gog auth tokens export`
+  - refresh_token: temporarily exported with `gog auth tokens export`
 """
 
 import json
@@ -25,18 +25,18 @@ TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 
 
 def get_access_token(account: str) -> str:
-    """Devuelve un access token válido intercambiando el refresh token de gog."""
-    # Leer client_id y client_secret del config de gog
+    """Exchange the gog refresh token for a valid access token."""
+    # Read client_id and client_secret from the gog config.
     if not GOG_CREDENTIALS.exists():
         raise FileNotFoundError(
-            f"No se encontró {GOG_CREDENTIALS}. "
-            "Asegúrate de tener gog-cli instalado y autenticado."
+            f"{GOG_CREDENTIALS} was not found. "
+            "Ensure gog-cli is installed and authenticated."
         )
     creds = json.loads(GOG_CREDENTIALS.read_text())
     client_id = creds["client_id"]
     client_secret = creds["client_secret"]
 
-    # Exportar refresh token temporalmente
+    # Export the refresh token temporarily.
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
         tmp = f.name
     try:
@@ -52,7 +52,7 @@ def get_access_token(account: str) -> str:
         except FileNotFoundError:
             pass
 
-    # Intercambiar refresh token por access token
+    # Exchange the refresh token for an access token.
     payload = urllib.parse.urlencode({
         "client_id": client_id,
         "client_secret": client_secret,
@@ -64,5 +64,5 @@ def get_access_token(account: str) -> str:
     with urllib.request.urlopen(req) as resp:
         result = json.loads(resp.read())
     if "access_token" not in result:
-        raise RuntimeError(f"OAuth2 no devolvió access_token: {result}")
+        raise RuntimeError(f"OAuth2 did not return access_token: {result}")
     return result["access_token"]

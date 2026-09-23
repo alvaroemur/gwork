@@ -1,0 +1,128 @@
+flowchart TB
+
+%% gwork plan → human review → apply workflow
+%% Three coordinated processes exchange events through decisions.yaml.
+%% Local CSV write-back is part of apply because cell-level push and write-back
+%% occur in the same atomic item transaction.
+
+    subgraph SPlan["1 · sync plan · agent"]
+        direction TB
+        PlanStart([gwork sync plan])
+        Load[Load manifest · state · token]
+        IteratePlan[Iterate manifest items]
+        PlanType{Item type?}
+        FetchSheet[Fetch Sheets values · formulas · notes · comments · headers]
+        StructureMatches{Structure matches snapshot?}
+        RecordDrift[Record structural drift]
+        DiffCells[Diff each cell · LOCAL · SNAPSHOT · REMOTE]
+        ClassifyCell{Cell classification?}
+        AcceptFormula[Accept remote formula-derived change]
+        PlanPush[Plan cell push]
+        PlanWriteBack[Plan local CSV write-back]
+        RecordPending[Record pending decision with context]
+        FetchDoc[Fetch Doc modifiedTime]
+        DocChanged{Doc changed after last apply?}
+        RecordDocDrift[Record Doc drift]
+        Transform[Apply strip_internal · rewrite_links]
+        WriteMarkdown[Write transformed Markdown to preview/]
+        WritePlan[Write preview/ · decisions.yaml]
+        PlanEnd([plan complete])
+    end
+
+    subgraph SReview["2 · human review through agent"]
+        direction TB
+        ReviewStart([decisions.yaml has pending items])
+        Summarize[Summarize pending decisions and drift]
+        Respond[Choose remote · local · skip · abort_item]
+        RecordDecision[Write resolutions to decisions.yaml]
+        ReviewEnd([decisions resolved])
+    end
+
+    subgraph SApply["3 · sync apply · agent"]
+        direction TB
+        ApplyStart([gwork sync apply])
+        HasPending{Unresolved decisions remain?}
+        AbortPending([abort · request new plan])
+        Revalidate[Re-fetch Drive and validate plan inputs]
+        SnapshotMatches{Remote snapshot unchanged?}
+        AbortRace([abort item · race detected])
+        IterateApply[Iterate changed items]
+        ApplyType{Item type?}
+        BuildMatrix[Build final matrix from merges and decisions]
+        BatchUpdate[Push cells with batchUpdate]
+        WriteBack[Write accepted remote cells to local CSV]
+        ReadMarkdown[Read transformed Markdown from preview/]
+        Pandoc[Convert Markdown to docx]
+        UploadDoc[Update Drive file with docx]
+        UpdateSnapshot[Update state snapshot]
+        ApplyEnd([apply complete])
+    end
+
+    Manifest[(.gwork.yaml)]
+    State[(.gwork/state.json)]
+    Preview[(.gwork/preview/)]
+    Decisions[(decisions.yaml)]
+    LocalFiles[(Local CSV + Markdown)]
+    Drive[(Google Drive · Sheets · Docs)]
+
+    PlanStart --> Load --> IteratePlan --> PlanType
+    PlanType -- sheet --> FetchSheet
+    PlanType -- doc --> FetchDoc
+    FetchSheet --> StructureMatches
+    StructureMatches -- drift --> RecordDrift --> WritePlan
+    StructureMatches -- yes --> DiffCells --> ClassifyCell
+    ClassifyCell -- "edited / clean" --> PlanPush --> WritePlan
+    ClassifyCell -- "clean / edited · formula" --> AcceptFormula --> PlanWriteBack --> WritePlan
+    ClassifyCell -- "clean / edited · no formula" --> RecordPending --> WritePlan
+    ClassifyCell -- "edited / edited" --> RecordPending
+    FetchDoc --> DocChanged
+    DocChanged -- yes --> RecordDocDrift --> WritePlan
+    DocChanged -- no --> Transform --> WriteMarkdown --> WritePlan
+    WritePlan --> PlanEnd
+
+    ReviewStart --> Summarize --> Respond --> RecordDecision --> ReviewEnd
+
+    ApplyStart --> HasPending
+    HasPending -- yes --> AbortPending
+    HasPending -- no --> Revalidate --> SnapshotMatches
+    SnapshotMatches -- no --> AbortRace
+    SnapshotMatches -- yes --> IterateApply --> ApplyType
+    ApplyType -- sheet --> BuildMatrix
+    BuildMatrix --> BatchUpdate --> UpdateSnapshot
+    BuildMatrix --> WriteBack --> UpdateSnapshot
+    ApplyType -- doc --> ReadMarkdown --> Pandoc --> UploadDoc --> UpdateSnapshot
+    UpdateSnapshot --> ApplyEnd
+
+    Manifest -. read .-> Load
+    State -. read snapshot .-> Load
+    Drive -. values · formulas · notes · comments .-> FetchSheet
+    Drive -. modifiedTime .-> FetchDoc
+    LocalFiles -. read CSV .-> DiffCells
+    LocalFiles -. read Markdown .-> Transform
+    WritePlan -. write artifacts .-> Preview
+    WritePlan -. write pending items · drift .-> Decisions
+    Decisions -. read .-> HasPending
+    Drive -. re-fetch .-> Revalidate
+    Preview -. read value diff .-> BuildMatrix
+    Decisions -. read resolutions .-> BuildMatrix
+    BatchUpdate -. write values .-> Drive
+    WriteBack -. rewrite CSV .-> LocalFiles
+    Preview -. read Markdown .-> ReadMarkdown
+    UploadDoc -. update Doc .-> Drive
+    UpdateSnapshot -. update .-> State
+    Decisions -. pending items found .-> ReviewStart
+    Decisions -. decisions resolved .-> ApplyStart
+
+    classDef start fill:#c8e6c9,stroke:#2e7d32,color:#000;
+    classDef finish fill:#ffcdd2,stroke:#c62828,color:#000;
+    classDef activity fill:#bbdefb,stroke:#1565c0,color:#000;
+    classDef gateway fill:#fff9c4,stroke:#f9a825,color:#000;
+    classDef io fill:#e0e0e0,stroke:#616161,color:#000;
+    classDef external fill:#f5f5f5,stroke:#616161,stroke-dasharray:5 5,color:#000;
+
+    class PlanStart,ReviewStart,ApplyStart start;
+    class PlanEnd,ReviewEnd,ApplyEnd,AbortPending,AbortRace finish;
+    class Load,IteratePlan,FetchSheet,RecordDrift,DiffCells,AcceptFormula,PlanPush,PlanWriteBack,RecordPending,FetchDoc,RecordDocDrift,Transform,WriteMarkdown,WritePlan,Summarize,Respond,RecordDecision,Revalidate,IterateApply,BuildMatrix,BatchUpdate,WriteBack,ReadMarkdown,Pandoc,UploadDoc,UpdateSnapshot activity;
+    class PlanType,StructureMatches,ClassifyCell,DocChanged,HasPending,SnapshotMatches,ApplyType gateway;
+    class Manifest,State,Preview,Decisions,LocalFiles io;
+    class Drive external;

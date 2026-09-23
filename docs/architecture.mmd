@@ -1,0 +1,68 @@
+flowchart LR
+
+%% gwork level-1 data-flow diagram
+%% gog-cli provides Workspace access. The design system formats uploaded files.
+%% Apps Script menus attach during the first upload.
+
+    User[User through coding agent]
+    Drive[(Google Drive · Sheets · Docs · Slides)]
+    GogCli[gog-cli]
+    Pandoc[Pandoc CLI]
+    GitHook[Git post-commit hook]
+
+    subgraph Gwork["gwork"]
+        direction TB
+        Plan[sync plan]
+        Apply[sync apply · push + write-back]
+        Format[style apply]
+        MenuScript[attach Apps Script menu]
+    end
+
+    Manifest[(.gwork.yaml)]
+    State[(.gwork/state.json)]
+    Preview[(.gwork/preview/)]
+    Decisions[(.gwork/preview/decisions.yaml)]
+    DesignSystem[(Design system in .gwork.yaml)]
+    LocalFiles[(Local CSV + Markdown deliverables)]
+
+    User -- "sync plan" --> Plan
+    User -- "sync apply" --> Apply
+    GitHook -. warns .-> User
+
+    Manifest -. read .-> Plan
+    LocalFiles -. read .-> Plan
+    State -. read snapshot .-> Plan
+    Plan -. fetch values · notes · comments .-> GogCli
+    GogCli -. response .-> Plan
+    Plan -. write transformed artifacts .-> Preview
+    Plan -. write pending decisions and drift .-> Decisions
+
+    Manifest -. read .-> Apply
+    State -. read snapshot .-> Apply
+    Preview -. read artifacts .-> Apply
+    Decisions -. read resolved decisions .-> Apply
+    LocalFiles -. read source Markdown .-> Apply
+    Apply -. Markdown to docx .-> Pandoc
+    Pandoc -. docx .-> Apply
+    Apply -. batchUpdate · upload · re-fetch .-> GogCli
+    Apply -. write cells back .-> LocalFiles
+    Apply -. update snapshot .-> State
+
+    Apply -- "post-upload" --> Format
+    DesignSystem -. read styles · palette · typography .-> Format
+    Format -. formatting batchUpdate .-> GogCli
+
+    Apply -- "first upload" --> MenuScript
+    MenuScript -. generate and bind Apps Script .-> GogCli
+    GogCli -. managed API calls · OAuth .-> Drive
+    LocalFiles -. detect commit changes .-> GitHook
+
+    classDef activity fill:#bbdefb,stroke:#1565c0,color:#000;
+    classDef io fill:#e0e0e0,stroke:#616161,color:#000;
+    classDef ioExt fill:#f5f5f5,stroke:#616161,stroke-dasharray:5 5,color:#000;
+    classDef external fill:#ffffff,stroke:#424242,color:#000;
+
+    class Plan,Apply,Format,MenuScript activity;
+    class User,Pandoc,GogCli,GitHook external;
+    class Drive ioExt;
+    class Manifest,State,Preview,Decisions,DesignSystem,LocalFiles io;

@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>cowork-drivesync · arquitectura</title>
+  <title>gwork · architecture</title>
   <style>
     body { font-family: -apple-system, sans-serif; margin: 20px; background: #fafafa; color: #222; }
     h1 { margin-bottom: 6px; }
@@ -16,18 +16,18 @@
   </style>
 </head>
 <body>
-  <h1>cowork-drivesync</h1>
-  <div class="sub">arquitectura, modelo de datos y procedimiento</div>
+  <h1>gwork</h1>
+  <div class="sub">Architecture, data model, and workflow</div>
   <nav id="nav"></nav>
-  <div id="diagram">Cargando…</div>
+  <div id="diagram">Loading…</div>
   <script type="module">
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
     mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
 
     const DIAGRAMS = [
-      { id: "l1",        label: "Nivel 1 · DFD",            file: "arquitectura.mmd" },
-      { id: "er",        label: "ER · modelo de datos",     file: "er.mmd" },
-      { id: "planapply", label: "Nivel 2 · plan → apply",   file: "arquitectura-plan-apply.mmd" },
+      { id: "l1",        label: "Level 1 · DFD",            file: "architecture.mmd" },
+      { id: "er",        label: "ER · data model",          file: "er.mmd" },
+      { id: "planapply", label: "Level 2 · plan → apply",   file: "architecture-plan-apply.mmd" },
     ];
 
     function currentId() {
@@ -42,11 +42,11 @@
         const res = await fetch(d.file + "?ts=" + Date.now());
         if (!res.ok) throw new Error("HTTP " + res.status);
         const src = await res.text();
-        const { svg } = await mermaid.render("arq-" + Date.now(), src);
+        const { svg } = await mermaid.render("arch-" + Date.now(), src);
         document.getElementById("diagram").innerHTML = svg;
       } catch (e) {
         document.getElementById("diagram").innerHTML =
-          `<div class="err">No pude renderizar ${d.file}: ${e.message}</div>`;
+          `<div class="err">Could not render ${d.file}: ${e.message}</div>`;
       }
     }
     const nav = document.getElementById("nav");
