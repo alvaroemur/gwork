@@ -545,6 +545,7 @@ class StyleSyncEngine:
                     plan["audit_issues"].append(
                         f"Table #{table_index} (row {r_idx}): background does not match striping ({bg})"
                     )
+                self._collect_cell_runs(cells, table_plan, font_primary, "#000000", False)
 
         plan["table_updates"].append(table_plan)
 
@@ -562,6 +563,16 @@ class StyleSyncEngine:
             for c_el in cell.get("content", []) or []:
                 if "paragraph" not in c_el:
                     continue
+                start_p = c_el.get("startIndex")
+                end_p = c_el.get("endIndex")
+                if start_p is not None and end_p is not None and start_p < end_p:
+                    table_plan.setdefault("cell_paragraph_updates", []).append({
+                        "start": start_p,
+                        "end": end_p,
+                        "space_above": 0,
+                        "space_below": 0,
+                        "line_spacing": 100,
+                    })
                 for run in c_el["paragraph"].get("elements", []) or []:
                     if "startIndex" not in run or "endIndex" not in run:
                         continue

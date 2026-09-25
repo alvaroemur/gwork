@@ -53,14 +53,32 @@ def _resolve_tabs(manifest: StyleManifest, account: Optional[str],
     return tabs
 
 
-def _ensure_template_tab(manifest: StyleManifest, account: Optional[str]) -> dict:
+TEMPLATE_CANDIDATE_NAMES = (
+    "_template", "template", "plantilla", "estilos", "estilo",
+    "design_system", "design system", "style", "style_guide", "style guide"
+)
+
+
+def _find_template_tab(tabs: list, configured_name: str) -> Optional[dict]:
+    """Find a template tab by exact configured name or common design system aliases."""
+    for tab in tabs:
+        if _tab_title(tab).lower().strip() == configured_name.lower().strip():
+            return tab
+    for tab in tabs:
+        title_norm = _tab_title(tab).lower().strip()
+        if title_norm in TEMPLATE_CANDIDATE_NAMES or any(cand in title_norm for cand in ("template", "plantilla", "design system")):
+            return tab
+    return None
+
+
+def _ensure_template_tab(manifest: StyleManifest, account: Optional[str],
+                         create_if_missing: bool = False) -> tuple[Optional[dict], bool]:
     tabs = gog.docs_list_tabs(manifest.doc_id, account)
-    existing = next(
-        (tab for tab in tabs if _tab_title(tab) == manifest.template_tab),
-        None,
-    )
+    existing = _find_template_tab(tabs, manifest.template_tab)
     if existing:
-        return {"id": _tab_id(existing), "title": _tab_title(existing)}
+        return {"id": _tab_id(existing), "title": _tab_title(existing)}, True
+    if not create_if_missing:
+        return None, False
     created = gog.docs_add_tab(manifest.doc_id, manifest.template_tab, account)
     created_id = (
         _tab_id(created)
@@ -68,73 +86,88 @@ def _ensure_template_tab(manifest: StyleManifest, account: Optional[str]) -> dic
         or _tab_id((created.get("tabProperties", {}) if isinstance(created, dict) else {}))
     )
     if created_id:
-        return {"id": created_id, "title": manifest.template_tab}
+        return {"id": created_id, "title": manifest.template_tab}, False
     tabs = gog.docs_list_tabs(manifest.doc_id, account)
     created_tab = next(tab for tab in tabs if _tab_title(tab) == manifest.template_tab)
-    return {"id": _tab_id(created_tab), "title": manifest.template_tab}
+    return {"id": _tab_id(created_tab), "title": manifest.template_tab}, False
 
 
-def refresh_template(manifest: StyleManifest, account: Optional[str]) -> dict:
-    """Extract live tokens, persist them, and rebuild the template tab."""
+def refresh_template(manifest: StyleManifest, account: Optional[str],
+                     create_missing_tab: bool = False) -> dict:
+    """Extract design system from an existing template tab or infer it from source tabs."""
     if not manifest.doc_id:
         raise ValueError("The manifest does not identify a Google Doc")
+
+    template_tab, already_existed = _ensure_template_tab(manifest, account, create_if_missing=create_missing_tab)
+
+    tabs_to_inspect = []
+    if already_existed and template_tab:
+        tabs_to_inspect.append(template_tab)
+
     source_tabs = [
         tab
         for tab in _resolve_tabs(manifest, account)
-        if tab["title"] != manifest.template_tab
+        if not template_tab or tab["title"] != template_tab["title"]
     ]
-    if not source_tabs:
+    tabs_to_inspect.extend(source_tabs)
+
+    if not tabs_to_inspect:
         raise ValueError("The document has no source tab to inspect")
+
     documents = [
         gog.docs_raw(manifest.doc_id, tab_id=tab["id"], account=account)
-        for tab in source_tabs
+        for tab in tabs_to_inspect
     ]
     tokens = extract_style_tokens(documents)
-    template_tab = _ensure_template_tab(manifest, account)
-    manifest.write_tokens(tokens, template_tab["id"])
+    tab_id_for_tokens = template_tab["id"] if template_tab else None
+    manifest.write_tokens(tokens, tab_id_for_tokens)
 
-    with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8", delete=False) as handle:
-        template_path = Path(handle.name)
-        handle.write(template_markdown(tokens))
-    try:
-        gog.docs_write_markdown(
-            manifest.doc_id,
-            template_tab["id"] or template_tab["title"],
-            template_path,
-            account,
-        )
-    finally:
-        template_path.unlink(missing_ok=True)
+    requests = []
+    if not already_existed and template_tab:
+        with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8", delete=False) as handle:
+            template_path = Path(handle.name)
+            handle.write(template_markdown(tokens))
+        try:
+            gog.docs_write_markdown(
+                manifest.doc_id,
+                template_tab["id"] or template_tab["title"],
+                template_path,
+                account,
+            )
+        finally:
+            template_path.unlink(missing_ok=True)
 
-    raw = gog.docs_raw(
-        manifest.doc_id,
-        tab_id=template_tab["id"],
-        account=account,
-    )
-    plan = StyleSyncEngine(manifest).analyze(
-        raw,
-        template_tab["id"],
-        template_tab["title"],
-    )
-    requests = build_requests(
-        plan,
-        template_tab["id"],
-        restore_table_widths=manifest.guard("auto_restore_table_widths"),
-        cell_padding=_table_padding(manifest),
-    )
-    if requests:
-        gog.batch_execute(
+        raw = gog.docs_raw(
             manifest.doc_id,
-            requests,
+            tab_id=template_tab["id"],
             account=account,
-            source="gwork.style.template",
         )
+        plan = StyleSyncEngine(manifest).analyze(
+            raw,
+            template_tab["id"],
+            template_tab["title"],
+        )
+        requests = build_requests(
+            plan,
+            template_tab["id"],
+            restore_table_widths=manifest.guard("auto_restore_table_widths"),
+            cell_padding=_table_padding(manifest),
+        )
+        if requests:
+            gog.batch_execute(
+                manifest.doc_id,
+                requests,
+                account=account,
+                source="gwork.style.template",
+            )
     return {
         "tokens": tokens,
-        "template_tab_id": template_tab["id"],
+        "template_tab_id": template_tab["id"] if template_tab else None,
         "source_tabs": len(source_tabs),
         "requests": len(requests),
+        "template_preserved": already_existed,
     }
+
 
 
 def cmd_manifest_init(manifest_path: Path, doc_id: str,

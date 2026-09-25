@@ -249,7 +249,7 @@ def batch_execute(doc_id: str, requests: list, account: Optional[str] = None,
         for req in requests:
             data["requests"].append({"command": source, "request": req})
         batch_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        return _run(["batch", "end", batch_id], account)
+        return _run(["batch", "end", "--auto-split", batch_id], account)
     except Exception:
         try:
             _run(["batch", "abort", batch_id], account)

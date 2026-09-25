@@ -132,6 +132,20 @@ def build_requests(plan: dict, tab_id=None, restore_table_widths: bool = True,
                 tab_id, t_start, sr["row"], cols, sr["bg"], cell_padding
             ))
 
+        for cpu in tbl.get("cell_paragraph_updates", []):
+            if cpu.get("start") is not None and cpu.get("end") is not None and cpu["start"] < cpu["end"]:
+                requests.append({
+                    "updateParagraphStyle": {
+                        "range": _range(tab_id, cpu["start"], cpu["end"]),
+                        "paragraphStyle": {
+                            "spaceAbove": {"magnitude": cpu["space_above"], "unit": "PT"},
+                            "spaceBelow": {"magnitude": cpu["space_below"], "unit": "PT"},
+                            "lineSpacing": cpu["line_spacing"],
+                        },
+                        "fields": "spaceAbove,spaceBelow,lineSpacing",
+                    }
+                })
+
         for ctu in tbl["cell_text_updates"]:
             requests.append({
                 "updateTextStyle": {
