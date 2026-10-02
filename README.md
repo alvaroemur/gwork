@@ -131,6 +131,46 @@ gwork sync sync --only DOCUMENT_ID/TAB_ID
 gwork sync apply --only SPREADSHEET_ID/0
 ```
 
+## Writing one Doc tab safely
+
+A Google Doc has a single `modifiedTime` for all its tabs, so it cannot tell
+which tab changed. For `content_mode: ast` (the default) gwork fingerprints
+each tab by its **content** and keeps a baseline of what Drive held:
+`.gwork/baseline/<file>.json` plus a hash in `.gwork.state.json`.
+
+```
+gwork sync bootstrap --only docs/report/3-1-tab.md   # 1. baseline the real Drive tab
+gwork sync plan --only docs/report/3-1-tab.md        # 2. per-tab summary: +added −removed ~changed
+gwork sync fetch --diff --only docs/report/3-1-tab.md  #    paragraph diff, read-only
+gwork sync apply --only docs/report/3-1-tab.md --dry-run  # 3. what would be sent; nothing is
+gwork sync apply --only docs/report/3-1-tab.md       # 4. replace that tab body only
+```
+
+- `bootstrap` reads the remote tab and stores it as the baseline. A local file
+  that differs is reported as `diverges`, never as in sync. Existing baselines
+  are kept unless you pass `--force`.
+- `plan` states per tab: `in sync`, `ready` (`+a −d ~c` is what apply changes),
+  `no baseline` (apply skips it), or `doc drift` (someone edited that tab on
+  Drive after the baseline). Drift is judged per tab; editing one tab no longer
+  flags the others.
+- `apply` requires `--only` (or `--all`) for Docs. It re-reads the tab right
+  before writing and aborts if it changed after the plan. After the write it
+  hashes the other registered tabs of the same Doc and warns if any changed,
+  then re-baselines only the written tab.
+- `--overwrite-remote` accepts overwriting Drive edits made after the baseline.
+  Read the plan first.
+- **Images:** replacing a tab body deletes its inline images. `apply` refuses a
+  tab that holds any unless you pass `--allow-image-loss`. gwork never inserts
+  images; add them by hand after the last apply of that tab.
+- `gwork sync pull --only <tab>` shows Drive as Markdown against the local file
+  (read-only). With `--apply` it overwrites the local file after saving a backup
+  in `.gwork/backups/` and re-baselines. Only headings, lists, bold, italic,
+  strikethrough, inline code, links and tables survive the conversion.
+
+Sheets keep the cell-level flow. When many cells are pending, `plan` prints
+a count per item instead of listing them; review one item at a time with
+`--only`.
+
 ## Docs writes: `content_mode`
 
 Doc items support two write modes:
