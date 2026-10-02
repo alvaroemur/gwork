@@ -22,6 +22,7 @@ class DocSnapshot:
     remote_modified_time: Optional[str] = None
     local_hash: Optional[str] = None
     applied_at: Optional[str] = None
+    baseline_hash: Optional[str] = None  # content hash of the remote tab at baseline
 
 
 class State:
@@ -51,6 +52,7 @@ class State:
             remote_modified_time=raw.get("remote_modified_time"),
             local_hash=raw.get("local_hash"),
             applied_at=raw.get("applied_at"),
+            baseline_hash=raw.get("baseline_hash"),
         )
 
     def set_sheet(self, local: str, snap: SheetSnapshot):
