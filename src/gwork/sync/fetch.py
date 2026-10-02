@@ -10,9 +10,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from . import baseline as bl
 from .commands import _doc_remote_drift, _plan_sheet, cmd_apply, cmd_plan
 from .docs import fetch_doc_modified_time, fetch_doc_plain_text
-from .gog import drive_comments_list
+from .docs_ast import UnsupportedNode
+from .gog import docs_raw, drive_comments_list
+from .transforms import apply_md_transforms, doc_transform_names
 from .manifest import Item, Manifest, load_manifest
 from .sheets import fetch_threaded_comments
 from .state import DocSnapshot, State, file_hash
@@ -120,13 +123,72 @@ def _assess_sheet_item(
     }
 
 
+def assess_doc_tab(
+    manifest: Manifest,
+    item: Item,
+    account: Optional[str],
+    with_diff: bool = False,
+) -> dict:
+    """Assess one tab by content against its baseline (not the Doc modifiedTime)."""
+    local_path = manifest.root / item.local
+    base = {"local": item.local, "type": "doc", "drive_id": item.drive_id,
+            "tab_id": item.doc_tab}
+    if not local_path.exists():
+        return {**base, "sync_status": "missing_local"}
+    result = apply_md_transforms(local_path, manifest, doc_transform_names(manifest, item))
+    try:
+        local_lines = bl.blocks_from_markdown(result.text)
+    except UnsupportedNode as exc:
+        return {**base, "sync_status": "unsupported", "unsupported_reason": str(exc)}
+    raw = docs_raw(item.drive_id, tab_id=item.doc_tab, account=account)
+    remote_lines = bl.blocks_from_raw(raw)
+    baseline = bl.load_baseline(manifest.root, item.local)
+    assessed = bl.assess_tab(local_lines, remote_lines, baseline)
+    local_changed = baseline is None or local_lines != baseline.blocks
+    status = {
+        "in_sync": "noop",
+        "no_baseline": "no_baseline",
+        "local_ahead": "local_only",
+        "drift": "conflict" if local_changed else "remote_only",
+    }[assessed["state"]]
+    entry = {
+        **base,
+        "sync_status": status,
+        "tab_state": assessed["state"],
+        "diff_summary": assessed["diff"],
+        "diff_label": assessed["diff_label"],
+        "has_images": bl.has_inline_objects(raw),
+        "remote_hash": assessed["remote_hash"],
+        "baseline_hash": assessed["baseline_hash"],
+    }
+    if status == "no_baseline":
+        entry["drift_reason"] = (
+            f"No baseline for this tab; run `gwork sync bootstrap --only {item.local}`."
+        )
+    elif assessed["state"] == "drift":
+        edited = assessed["remote_vs_baseline"]
+        entry["drift_reason"] = (
+            f"Tab edited on Drive since the baseline "
+            f"(+{edited['added']} −{edited['removed']} ~{edited['changed']})"
+        )
+    if with_diff:
+        entry["diff_text"] = bl.unified_block_diff(
+            remote_lines, local_lines, f"drive:{item.drive_id}/{item.doc_tab}",
+            f"local:{item.local}",
+        )
+    return entry
+
+
 def assess_item(
     manifest: Manifest,
     item: Item,
     state: State,
     account: Optional[str],
+    with_diff: bool = False,
 ) -> dict:
     local_path = manifest.root / item.local
+    if item.type == "doc" and manifest.effective_content_mode(item) == "ast":
+        return assess_doc_tab(manifest, item, account, with_diff=with_diff)
     if item.type == "doc":
         snapshot = state.get_doc(item.local)
         remote_mt = fetch_doc_modified_time(item.drive_id, account)
@@ -184,7 +246,7 @@ def cmd_fetch(
     results = []
 
     for item in selected_items:
-        entry = assess_item(manifest, item, state, account)
+        entry = assess_item(manifest, item, state, account, with_diff=diff)
 
         if comments and item.type in ("doc", "sheet"):
             raw = drive_comments_list(item.drive_id, account)
@@ -192,7 +254,9 @@ def cmd_fetch(
             if item.type == "sheet":
                 entry["comments_context"] = fetch_threaded_comments(item.drive_id, account)
 
-        if diff and item.type == "doc":
+        if diff and item.type == "doc" and "diff_text" in entry:
+            entry["diff"] = entry.pop("diff_text")
+        elif diff and item.type == "doc":
             local_path = manifest.root / item.local
             if local_path.exists():
                 local_plain = normalize_plain(md_to_plain_approx(local_path.read_text(encoding="utf-8")))
@@ -219,7 +283,7 @@ def cmd_fetch(
     table.add_column("item")
     table.add_column("type")
     table.add_column("status")
-    table.add_column("remote")
+    table.add_column("local vs Drive")
     for entry in results:
         status = entry.get("sync_status", entry.get("status", "?"))
         color = {
@@ -228,13 +292,15 @@ def cmd_fetch(
             "remote_only": "yellow",
             "conflict": "red",
             "missing_local": "red",
+            "no_baseline": "yellow",
         }.get(status, "white")
         remote_mt = (entry.get("remote_modified_time") or "")[:19]
+        detail = entry.get("diff_label") or remote_mt
         table.add_row(
             entry["local"],
             entry.get("type", "?"),
             f"[{color}]{status}[/{color}]",
-            remote_mt,
+            detail,
         )
     console.print(table)
 
@@ -256,13 +322,14 @@ def cmd_fetch(
                     title=f"Open comments · {entry['local']}",
                 ))
 
-        if diff and entry.get("diff"):
+        if diff and isinstance(entry.get("diff"), str) and entry["diff"]:
             snippet = entry["diff"]
             if len(snippet) > 4000:
                 snippet = snippet[:4000] + "\n… (diff truncated)\n"
             console.print(Panel(snippet, title=f"diff · {entry['local']}", border_style="cyan"))
 
-    blockers = [e for e in results if e.get("sync_status") in ("remote_only", "conflict")]
+    blockers = [e for e in results
+                if e.get("sync_status") in ("remote_only", "conflict", "no_baseline")]
     if blockers:
         console.print(
             f"\n[yellow]{len(blockers)} item(s) with Drive-only changes or conflicts — "
@@ -279,6 +346,9 @@ def cmd_sync(
     force_content_push: bool = False,
     comments: bool = False,
     diff: bool = False,
+    overwrite_remote: bool = False,
+    allow_image_loss: bool = False,
+    all_items: bool = False,
 ) -> int:
     """Run fetch → plan → optional apply. Do not write when remote drift exists."""
     manifest = load_manifest(root)
@@ -296,15 +366,17 @@ def cmd_sync(
         entry = assess_item(manifest, item, state, account)
         status = entry.get("sync_status")
         console.print(f"  {item.local}: [{status}]")
-        if status in ("remote_only", "conflict"):
+        if status in ("remote_only", "conflict", "no_baseline") and not (
+                overwrite_remote and status != "no_baseline"):
             blockers.append(entry)
             if entry.get("drift_reason"):
                 console.print(f"    [yellow]{entry['drift_reason']}[/yellow]")
 
     if blockers:
         console.print(
-            "\n[red]Sync aborted:[/red] Drive has changes absent from local Markdown. "
-            "Run `gwork sync fetch --comments --diff`, then resolve them in the UI "
+            "\n[red]Sync aborted:[/red] Drive has changes absent from local Markdown, "
+            "or a tab has no baseline. Run `gwork sync fetch --comments --diff`, "
+            "`gwork sync bootstrap --only <tab>`, then resolve them in the UI "
             "or align the local file before pushing."
         )
         return 2
@@ -331,4 +403,7 @@ def cmd_sync(
         only=only or [],
         account=account,
         force_content_push=force_content_push,
+        overwrite_remote=overwrite_remote,
+        allow_image_loss=allow_image_loss,
+        all_items=all_items,
     )

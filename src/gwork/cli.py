@@ -17,6 +17,7 @@ from .style.commands import (
 )
 from .sync.commands import cmd_bootstrap, cmd_plan, cmd_apply
 from .sync.fetch import cmd_fetch, cmd_sync
+from .sync.pull import cmd_pull
 from .sync.organization import apply_organization, plan_organization
 
 
@@ -30,6 +31,17 @@ def sync():
     """Sync local Markdown and CSV files with Google Drive."""
 
 
+_OVERWRITE_OPT = click.option(
+    "--overwrite-remote", is_flag=True, default=False,
+    help="Accept overwriting Drive edits made after the baseline (review the plan first).")
+_IMAGE_OPT = click.option(
+    "--allow-image-loss", is_flag=True, default=False,
+    help="Allow replacing a tab body that holds inline images (they are deleted).")
+_ALL_OPT = click.option(
+    "--all", "all_items", is_flag=True, default=False,
+    help="Apply every registered item; Docs otherwise require --only.")
+
+
 @sync.command("bootstrap")
 @click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
               default=Path.cwd, help="Project directory.")
@@ -38,9 +50,16 @@ def sync():
               show_default=True, help="Initial source of truth.")
 @click.option("--only", multiple=True,
               help="Exact local path, Drive ID, resource ID, or Drive/resource pair.")
-def bootstrap(root: Path, account: str, source: str, only: tuple):
-    """Create initial snapshots before the first plan."""
-    sys.exit(cmd_bootstrap(root, source=source, account=account, only=list(only)))
+@click.option("--force", is_flag=True, default=False,
+              help="Rebuild snapshots and baselines that already exist.")
+def bootstrap(root: Path, account: str, source: str, only: tuple, force: bool):
+    """Baseline Drive per tab/sheet and report local divergence.
+
+    Docs always baseline the real remote content of each tab; a local file that
+    differs is reported as diverged instead of being marked in sync.
+    """
+    sys.exit(cmd_bootstrap(root, source=source, account=account, only=list(only),
+                           force=force))
 
 
 @sync.command("plan")
@@ -90,12 +109,18 @@ def fetch(root: Path, account: str, only: tuple, comments: bool, diff: bool, as_
               help="Show open comments during preflight.")
 @click.option("--diff", is_flag=True, default=False,
               help="Show an approximate Docs diff during preflight.")
+@_OVERWRITE_OPT
+@_IMAGE_OPT
+@_ALL_OPT
 def sync_sync(root: Path, account: str, only: tuple, do_apply: bool,
-              force_content_push: bool, comments: bool, diff: bool):
+              force_content_push: bool, comments: bool, diff: bool,
+              overwrite_remote: bool, allow_image_loss: bool, all_items: bool):
     """Run fetch and plan, then optionally apply if Drive has not drifted."""
     sys.exit(cmd_sync(
         root, account=account, only=list(only), apply=do_apply,
         force_content_push=force_content_push, comments=comments, diff=diff,
+        overwrite_remote=overwrite_remote, allow_image_loss=allow_image_loss,
+        all_items=all_items,
     ))
 
 
@@ -111,12 +136,36 @@ def sync_sync(root: Path, account: str, only: tuple, do_apply: bool,
     default=False,
     help="Legacy safeguard for docx_upload items that replace the complete file.",
 )
-def apply(root: Path, account: str, only: tuple, force_content_push: bool):
-    """Apply the reviewed plan to Drive and local files."""
+@_OVERWRITE_OPT
+@_IMAGE_OPT
+@_ALL_OPT
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Show what each Doc tab would receive; send nothing.")
+def apply(root: Path, account: str, only: tuple, force_content_push: bool,
+          overwrite_remote: bool, allow_image_loss: bool, all_items: bool, dry_run: bool):
+    """Apply the reviewed plan to Drive and local files.
+
+    Docs require --only (one tab) or --all. Only the selected tab body is
+    replaced; other tabs are hashed before and after to prove they stayed intact.
+    """
     sys.exit(cmd_apply(
         root, only=list(only), account=account,
-        force_content_push=force_content_push,
+        force_content_push=force_content_push, overwrite_remote=overwrite_remote,
+        allow_image_loss=allow_image_loss, dry_run=dry_run, all_items=all_items,
     ))
+
+
+@sync.command("pull")
+@click.option("--root", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              default=Path.cwd, help="Project directory.")
+@click.option("--account", default=None, help="Google account override for gog.")
+@click.option("--only", multiple=True, required=True,
+              help="Exact local path, resource ID, or Drive/resource pair (one Doc tab).")
+@click.option("--apply", "do_apply", is_flag=True, default=False,
+              help="Overwrite the local Markdown (a backup is kept) and re-baseline.")
+def pull(root: Path, account: str, only: tuple, do_apply: bool):
+    """Show (or write) one Doc tab as Markdown, to catch manual Drive edits."""
+    sys.exit(cmd_pull(root, only=list(only), account=account, do_apply=do_apply))
 
 
 def _run_organization(plan_data: dict, do_apply: bool) -> None:
