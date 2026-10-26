@@ -6,3 +6,7 @@ dist/
 build/
 .gwork/preview/
 .gwork.state.json.lock
+
+# Notas de sesión (briefs, análisis): locales en repos públicos
+.briefs/
+.analysis/
